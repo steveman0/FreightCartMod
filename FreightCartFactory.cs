@@ -13,7 +13,7 @@ public class FreightCartFactory : MachineEntity
     public bool mbCannotFindResource;
 
     public FreightCartFactory(ModCreateSegmentEntityParameters parameters)
-      : base(eSegmentEntity.Mod, SpawnableObjectEnum.Minecart_Track_Factory, parameters.X, parameters.Y, parameters.Z, parameters.Cube, parameters.Flags, parameters.Value, Vector3.zero, parameters.Segment)
+      : base(parameters)
     {
         this.mbNeedsLowFrequencyUpdate = true;
         this.mbNeedsUnityUpdate = false;
@@ -129,27 +129,27 @@ public class FreightCartFactory : MachineEntity
         this.mForwards.Normalize();
     }
 
-    private bool IsTrackPiece(long checkX, long checkY, long checkZ)
-    {
-        Segment segment;
-        if (this.mFrustrum != null)
-        {
-            segment = this.AttemptGetSegment(checkX, checkY, checkZ);
-            if (segment == null)
-                return false;
-        }
-        else
-        {
-            segment = WorldScript.instance.GetSegment(checkX, checkY, checkZ);
-            if (segment == null || !segment.mbInitialGenerationComplete || segment.mbDestroyed)
-            {
-                this.mrSpawnDelay = 10f;
-                return false;
-            }
-        }
-        segment.GetCube(checkX, checkY, checkZ);
-        return true;
-    }
+    //private bool IsTrackPiece(long checkX, long checkY, long checkZ)
+    //{
+    //    Segment segment;
+    //    if (this.mFrustrum != null)
+    //    {
+    //        segment = this.AttemptGetSegment(checkX, checkY, checkZ);
+    //        if (segment == null)
+    //            return false;
+    //    }
+    //    else
+    //    {
+    //        segment = WorldScript.instance.GetSegment(checkX, checkY, checkZ);
+    //        if (segment == null || !segment.mbInitialGenerationComplete || segment.mbDestroyed)
+    //        {
+    //            this.mrSpawnDelay = 10f;
+    //            return false;
+    //        }
+    //    }
+    //    segment.GetCube(checkX, checkY, checkZ);
+    //    return true;
+    //}
 
     public override HoloMachineEntity CreateHolobaseEntity(Holobase holobase)
     {

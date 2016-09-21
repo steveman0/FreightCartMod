@@ -5,6 +5,12 @@ using System.Reflection;
 
 public class FreightCartMod : FortressCraftMod
 {
+    public static int Update;
+    public static int LiveCarts = 0;
+    public static int LiveUpdateTime = -1000;
+    public static bool CartCheckin = false;
+    public static FreightSystemMonitor monitor;
+
     public override ModRegistrationData Register()
     {
         ModRegistrationData modRegistrationData = new ModRegistrationData();
@@ -14,22 +20,23 @@ public class FreightCartMod : FortressCraftMod
         modRegistrationData.RegisterMobHandler("steveman0.FreightCart_T3");
         modRegistrationData.RegisterMobHandler("steveman0.FreightCart_T4");
         modRegistrationData.RegisterMobHandler("steveman0.FreightCartMK1");
+        modRegistrationData.RegisterMobHandler("steveman0.FreightCart_Tour");
         modRegistrationData.RegisterEntityHandler("steveman0.FreightSystemMonitor");
         modRegistrationData.RegisterEntityHandler("steveman0.FreightCartFactory");
+        modRegistrationData.RegisterEntityHandler("steveman0.TrackJunction");
+        modRegistrationData.RegisterEntityHandler("steveman0.TourCartStation");
 
-        //I have to use this to register the mob because the mob registration above doesn't work.  See the forum with details.
-        //ModMobMap modmap = new ModMobMap();
-        //modmap.Key = "steveman0.FreightCartMK1";
-        //modmap.Value = ModManager.mModMappings.MobsByKey.Count + 1;
-        //ModManager.mModMappings.MobsByKey.Add(modmap.Key, modmap);
-        //ModManager.mModMappings.MobsByNumber.Add(modmap.Value, modmap);
+        UIManager.NetworkCommandFunctions.Add("FreightCartWindow", new UIManager.HandleNetworkCommand(FreightCartWindow.HandleNetworkCommand));
 
-        //Dictionary<string, MobHandlerRegistration> x = new Dictionary<string, MobHandlerRegistration>();
-        //x = (Dictionary<string, MobHandlerRegistration>)x.GetType().GetField("mMobHandlersByKey", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(x);
-        //x.Add("steveman0.FreightCartMK1", new MobHandlerRegistration("steveman0.FreightCartMK1", this));
+        //new FreightCartManager();
 
-        new FreightCartManager();
-        Debug.Log("Freight Cart Mod V3 registered");
+        //For generating the sync class on the Unity thread after moving freight cart manager to LFU
+        GameObject Sync = new GameObject("ManagerSync");
+        Sync.AddComponent<ManagerSync>();
+        Sync.SetActive(true);
+        Sync.GetComponent<ManagerSync>().enabled = true;
+
+        Debug.Log("Freight Cart Mod V5 registered");
 
         return modRegistrationData;
     }
@@ -38,16 +45,36 @@ public class FreightCartMod : FortressCraftMod
     {
         ModCreateSegmentEntityResults result = new ModCreateSegmentEntityResults();
 
+
+        if (parameters.Cube == ModManager.mModMappings.CubesByKey["steveman0.TrackJunction"].CubeType)
+        {
+            parameters.ObjectType = SpawnableObjectEnum.Minecart_Track_Straight;
+            result.Entity = new FreightTrackJunction(parameters);
+        }
         foreach (ModCubeMap cubeMap in ModManager.mModMappings.CubeTypes)
         {
             if (cubeMap.CubeType == parameters.Cube)
             {
                 if (cubeMap.Key.Equals("steveman0.FreightCartStation"))
-                    result.Entity = new FreightCartStation(parameters.Segment, parameters.X, parameters.Y, parameters.Z, parameters.Cube, parameters.Flags, parameters.Value, parameters.LoadFromDisk);
-                if (cubeMap.Key.Equals("steveman0.FreightSystemMonitor"))
-                    result.Entity = new FreightSystemMonitor(parameters.Segment, parameters.X, parameters.Y, parameters.Z, parameters.Cube, parameters.Flags, parameters.Value, parameters.LoadFromDisk);
-                if (cubeMap.Key.Equals("steveman0.FreightCartFactory"))
+                {
+                    parameters.ObjectType = SpawnableObjectEnum.Minecart_Track_LoadStation;
+                    result.Entity = new FreightCartStation(parameters);
+                }
+                else if (cubeMap.Key.Equals("steveman0.FreightSystemMonitor"))
+                {
+                    parameters.ObjectType = SpawnableObjectEnum.AutoBuilder;
+                    result.Entity = new FreightSystemMonitor(parameters);
+                }
+                else if (cubeMap.Key.Equals("steveman0.FreightCartFactory"))
+                {
+                    parameters.ObjectType = SpawnableObjectEnum.Minecart_Track_Factory;
                     result.Entity = new FreightCartFactory(parameters);
+                }
+                else if (cubeMap.Key.Equals("steveman0.TourCartStation"))
+                {
+                    parameters.ObjectType = SpawnableObjectEnum.Minecart_Track_Factory;
+                    result.Entity = new TourCartStation(parameters);
+                }
             }
         }
         return result;
@@ -63,11 +90,31 @@ public class FreightCartMod : FortressCraftMod
             results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCart_T3, parameters);
         if (parameters.MobKey == "steveman0.FreightCart_T4")
             results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCart_T4, parameters);
+        if (parameters.MobKey == "steveman0.FreightCart_Tour")
+            results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCartTour, parameters);
 
         if (parameters.MobKey == "steveman0.FreightCartMK1")
             results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCartMK1, parameters);
 
         base.CreateMobEntity(parameters, results);
+    }
+
+    public override void LowFrequencyUpdate()
+    {
+        Update++;
+        if (FreightCartManager.instance == null)
+            new FreightCartManager();
+        else
+            FreightCartManager.instance.UpdateMassInventory();
+        if (Update - LiveUpdateTime < 10)
+            CartCheckin = true;
+        else if (CartCheckin)
+        {
+            Debug.LogWarning("---------FREIGHT CART DEBUG------------\nLive carts checked in: " + LiveCarts.ToString());
+            FloatingCombatTextManager.instance.QueueText(monitor.mnX, monitor.mnY + 1L, monitor.mnZ, 1f, "Total Freight Carts Active: " + ManagerSync.instance.CartCounter.ToString(), Color.yellow, 2f, 64f);
+            CartCheckin = false;
+            LiveCarts = 0;
+        }
     }
 }
 

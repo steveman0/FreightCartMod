@@ -5,15 +5,26 @@ using System.Linq;
 
 public class FreightCartWindow : BaseMachineWindow
 {
-    public const string InterfaceName = "FreightCartStation";
+    public const string InterfaceName = "FreightCartWindow";
+    public const string InterfaceRemoveReg = "RemoveReg";
+    public const string InterfaceSetLowStock = "SetLowStock";
+    public const string InterfaceSetHighStock = "SetHighStock";
+    public const string InterfaceSetNetwork = "SetNetwork";
+    public const string InterfaceCopyFreight = "CopyFreight";
+    public const string InterfacePasteFreight = "PasteFreight";
+    public const string InterfaceAssignedCarts = "AssignCart";
+    public const string InterfaceToggleLoad = "ToggleLoad";
+
 
     private static bool dirty;
+    private static bool networkredraw;
     private bool ChooseLowStock = false;
     private bool ItemSearchWindow = false;
     private List<ItemBase> SearchResults;
     private string EntryString;
     private int Counter;
     private bool SetNetworkID = false;
+    private bool SetFreightItems = false;
 
     public override void SpawnWindow(SegmentEntity targetEntity)
     {
@@ -29,11 +40,22 @@ public class FreightCartWindow : BaseMachineWindow
         UIUtil.UILock = true;
 
 
-        if (!ItemSearchWindow && !SetNetworkID && !string.IsNullOrEmpty(station.NetworkID))
+        if (!SetFreightItems && !ItemSearchWindow && !SetNetworkID && !string.IsNullOrEmpty(station.NetworkID))
         {
-            this.manager.SetTitle("Freight Cart Station - Register Freight");
+            this.manager.SetTitle("Freight Cart Station");
             this.manager.AddButton("namenetwork", "Change Network", 15, 0);
             this.manager.AddBigLabel("networkid", station.NetworkID, Color.white, 165, 0);
+            this.manager.AddButton("setfreight", "Set Freight Goods", 100, 55);
+            this.manager.AddBigLabel("assignedcarts", "Assigned Carts: " + station.AssignedCarts.ToString(), Color.white, 15, 105);
+            this.manager.AddButton("decreasecarts", "Remove Cart", 25, 150);
+            this.manager.AddButton("increasecarts", "Add Cart", 175, 150);
+            this.manager.AddButton("toggleload", "Toggle Load", 25, 210);
+            this.manager.AddBigLabel("loadstatus", "Wait for " + (station.mbWaitForFullLoad ? "Full" : "Any"), Color.white, 165, 210);
+        }
+        else if (SetFreightItems && !ItemSearchWindow && !SetNetworkID && !string.IsNullOrEmpty(station.NetworkID))
+        {
+            this.manager.SetTitle("Freight Cart Station - Register Freight");
+            this.manager.AddButton("freightdone", "Done", 100, 0);
             this.manager.AddTabButton("switchlowstock", "Edit Requests", !this.ChooseLowStock, 25, 50);
             this.manager.AddTabButton("switchhighstock", "Edit Offers", this.ChooseLowStock, 175, 50);
 
@@ -92,6 +114,7 @@ public class FreightCartWindow : BaseMachineWindow
             this.manager.AddBigLabel("networkentry", "_", Color.cyan, 50, 65);
         }
         dirty = true;
+        networkredraw = false;
     }
 
     public override void UpdateMachine(SegmentEntity targetEntity)
@@ -106,7 +129,17 @@ public class FreightCartWindow : BaseMachineWindow
         }
         UIUtil.UIdelay = 0;
 
-        if (!ItemSearchWindow && !SetNetworkID && station.NetworkID != null)
+        if (networkredraw)
+            this.manager.RedrawWindow();
+        if (!dirty)
+            return;
+
+        if (!SetFreightItems && !ItemSearchWindow && !SetNetworkID && !string.IsNullOrEmpty(station.NetworkID))
+        {
+            this.manager.UpdateLabel("assignedcarts", "Assigned Carts: " + station.AssignedCarts.ToString(), Color.white);
+            this.manager.UpdateLabel("loadstatus", "Wait for " + (station.mbWaitForFullLoad ? "Full" : "Any"), Color.white);
+        }
+        else if (SetFreightItems && !ItemSearchWindow && !SetNetworkID && station.NetworkID != null)
         {
             List<FreightRegistry> registries = new List<FreightRegistry>();
             if (station.massStorageCrate != null)
@@ -160,7 +193,7 @@ public class FreightCartWindow : BaseMachineWindow
                         {
                             bool foundvalue = false;
                             if (TerrainData.mEntries[n] == null) continue;
-                            if (TerrainData.mEntries[n].Name.ToLower().Contains(this.EntryString.ToLower()))
+                            if (TerrainData.mEntries[n].Name.ToLower().Contains(this.EntryString.ToLower()) || TerrainData.mEntries[n].Name.ToLower().Equals("machine placement"))
                             {
                                 int count = TerrainData.mEntries[n].Values.Count;
                                 for (int m = 0; m < count; m++)
@@ -172,7 +205,7 @@ public class FreightCartWindow : BaseMachineWindow
                                     }
                                 }
                                 if (!foundvalue)
-                                    this.SearchResults.Add(ItemManager.SpawnCubeStack(TerrainData.mEntries[n].CubeType, 0, 1));
+                                    this.SearchResults.Add(ItemManager.SpawnCubeStack(TerrainData.mEntries[n].CubeType, TerrainData.mEntries[n].DefaultValue, 1));
                             }
                         }
                         if (this.SearchResults.Count == 0)
@@ -219,26 +252,11 @@ public class FreightCartWindow : BaseMachineWindow
                 }
                 else if (c == "\n"[0] || c == "\r"[0]) //Enter or Return
                 {
-                    string oldid = station.NetworkID;
-                    if (!string.IsNullOrEmpty(this.EntryString))
-                    {
-                        if (station.massStorageCrate != null)
-                            FreightCartManager.instance.CopyFreightEntries(oldid, station.massStorageCrate);
-                        if (!string.IsNullOrEmpty(oldid))
-                            FreightCartManager.instance.RemoveStationReg(station);
-                        station.NetworkID = this.EntryString;
-                        FreightCartManager.instance.TryRegisterStation(station);
-                        if (station.massStorageCrate != null)
-                            FreightCartManager.instance.PasteFreightEntries(station.NetworkID, station.massStorageCrate);
-                    }
-                    FreightCartManager.instance.AddNetwork(station.NetworkID);
+                    FreightCartWindow.SetNetwork(station, this.EntryString);
                     this.SetNetworkID = false;
                     this.EntryString = "";
-
                     UIManager.mbEditingTextField = false;
                     UIManager.RemoveUIRules("TextEntry");
-
-                    this.manager.RedrawWindow();
                     return;
                 }
                 else
@@ -277,23 +295,20 @@ public class FreightCartWindow : BaseMachineWindow
             List<FreightRegistry> registries = FreightCartManager.instance.GetFreightEntries(station.NetworkID, station.massStorageCrate);
 
             if (slotNum > -1) // valid slot
-            {
-                //clear registry
-                FreightCartManager.instance.RemoveRegistry(station.NetworkID, station.massStorageCrate, registries[slotNum].FreightItem);
-                this.manager.RedrawWindow();
-            }
-
+                FreightCartWindow.RemoveRegistry(station, registries[slotNum].FreightItem);
             return true;
         }
         else if (name.Contains("switchlowstock"))
         {
             this.ChooseLowStock = true;
             this.manager.RedrawWindow();
+            return true;
         }
         else if (name.Contains("switchhighstock"))
         {
             this.ChooseLowStock = false;
             this.manager.RedrawWindow();
+            return true;
         }
         else if (name.Contains("decreasestock"))
         {
@@ -317,16 +332,16 @@ public class FreightCartWindow : BaseMachineWindow
                     stock = registries[slotNum].LowStock - amount;
                     if (stock < 0)
                         stock = 0;
-                    FreightCartManager.instance.UpdateRegistry(station.NetworkID, station.massStorageCrate, registries[slotNum].FreightItem, stock, registries[slotNum].HighStock);
-                    this.manager.UpdateLabel("lowstock" + slotNum, stock.ToString(), Color.white);
+                    FreightCartWindow.SetLowStock(station, registries[slotNum].FreightItem, stock);
+                    return true;
                 }
                 else
                 {
                     stock = registries[slotNum].HighStock - amount;
                     if (stock < 0)
                         stock = 0;
-                    FreightCartManager.instance.UpdateRegistry(station.NetworkID, station.massStorageCrate, registries[slotNum].FreightItem, registries[slotNum].LowStock, stock);
-                    this.manager.UpdateLabel("highstock" + slotNum, stock.ToString(), Color.white);
+                    FreightCartWindow.SetHighStock(station, registries[slotNum].FreightItem, stock);
+                    return true;
                 }
             }
         }
@@ -350,14 +365,14 @@ public class FreightCartWindow : BaseMachineWindow
                 if (this.ChooseLowStock)
                 {
                     stock = registries[slotNum].LowStock + amount;
-                    FreightCartManager.instance.UpdateRegistry(station.NetworkID, station.massStorageCrate, registries[slotNum].FreightItem, stock, registries[slotNum].HighStock);
-                    this.manager.UpdateLabel("lowstock" + slotNum, stock.ToString(), Color.white);
+                    FreightCartWindow.SetLowStock(station, registries[slotNum].FreightItem, stock);
+                    return true;
                 }
                 else
                 {
                     stock = registries[slotNum].HighStock + amount;
-                    FreightCartManager.instance.UpdateRegistry(station.NetworkID, station.massStorageCrate, registries[slotNum].FreightItem, registries[slotNum].LowStock, stock);
-                    this.manager.UpdateLabel("highstock" + slotNum, stock.ToString(), Color.white);
+                    FreightCartWindow.SetHighStock(station, registries[slotNum].FreightItem, stock);
+                    return true;
                 }
             }
         }
@@ -369,6 +384,7 @@ public class FreightCartWindow : BaseMachineWindow
             UIManager.RemoveUIRules("TextEntry");
             this.EntryString = "";
             this.manager.RedrawWindow();
+            return true;
         }
         else if (name.Contains("itemicon"))
         {
@@ -376,11 +392,12 @@ public class FreightCartWindow : BaseMachineWindow
             int.TryParse(name.Replace("itemicon", ""), out slotNum); //Get slot name as number
             if (slotNum > -1)
             {
-                FreightCartManager.instance.AddRegistry(station.NetworkID, station.massStorageCrate, this.SearchResults[slotNum], 0, 0);
+                FreightCartWindow.AddRegistry(station, this.SearchResults[slotNum]);
                 this.SearchResults = null;
                 this.ItemSearchWindow = false;
                 this.EntryString = "";
-                this.manager.RedrawWindow();
+                GenericMachinePanelScript.instance.Scroll_Bar.GetComponent<UIScrollBar>().scrollValue = 0.0f;
+                return true;
             }
         }
         else if (name == "namenetwork")
@@ -402,6 +419,39 @@ public class FreightCartWindow : BaseMachineWindow
             }
             this.manager.RedrawWindow();
         }
+        else if (name == "setfreight")
+        {
+            this.SetFreightItems = true;
+            this.manager.RedrawWindow();
+            return true;
+        }
+        else if (name == "freightdone")
+        {
+            this.SetFreightItems = false;
+            this.manager.RedrawWindow();
+            return true;
+        }
+        else if (name == "increasecarts")
+        {
+            int amount = 1;
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                amount = 10;
+            FreightCartWindow.SetCartAssignment(station, station.AssignedCarts + amount);
+            return true;
+        }
+        else if (name == "decreasecarts")
+        {
+            int amount = 1;
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                amount = 10;
+            FreightCartWindow.SetCartAssignment(station, station.AssignedCarts - amount < 0 ? 0 : station.AssignedCarts - amount);
+            return true;
+        }
+        else if (name == "toggleload")
+        {
+            FreightCartWindow.ToggleLoadStatus(station, !station.mbWaitForFullLoad ? "Full" : "Any");
+            return true;
+        }
 
         return false;
     }
@@ -420,15 +470,115 @@ public class FreightCartWindow : BaseMachineWindow
             if (slotNum == -1) // valid slot
             {
                 if (this.manager.mWindowLookup[name + "_icon"].GetComponent<UISprite>().spriteName == "empty")
-                {
-                    //Debug.Log("We're trying to drop in item");
-                    FreightCartManager.instance.AddRegistry(station.NetworkID, station.massStorageCrate, draggedItem, 0, 0);
-                    this.manager.RedrawWindow();
-                }
+                    FreightCartWindow.AddRegistry(station, draggedItem);
             }
         }
 
         return;
+    }
+
+    public static void RemoveRegistry(FreightCartStation station, ItemBase item)
+    {
+        if (item == null)
+            Debug.LogWarning("Freight cart window trying to remove registry for null item!");
+        FreightCartManager.instance.RemoveRegistry(station.NetworkID, station.massStorageCrate, item);
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "RemoveReg", null, item, station, 0f);
+        FreightCartWindow.networkredraw = true;
+        station.MarkDirtyDelayed();
+    }
+
+    public static void SetLowStock(FreightCartStation station, ItemBase item, int stock)
+    {
+        if (item == null)
+            Debug.LogWarning("Freight cart window trying to set low stock for null item!");
+        FreightRegistry reg = FreightCartManager.instance.MasterRegistry.First(x => x.NetworkID == station.NetworkID && x.MassStorage == station.massStorageCrate && x.FreightItem.Compare(item));
+        int highstock = -1;
+        if (reg != null)
+            highstock = reg.HighStock;
+        FreightCartManager.instance.UpdateRegistry(station.NetworkID, station.massStorageCrate, item, stock, stock > highstock ? stock : -1);
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "SetLowStock", stock.ToString(), item, station, 0f);
+        FreightCartWindow.dirty = true;
+        station.MarkDirtyDelayed();
+    }
+
+    public static void SetHighStock(FreightCartStation station, ItemBase item, int stock)
+    {
+        if (item == null)
+            Debug.LogWarning("Freight cart window trying to set high stock for null item!");
+        FreightCartManager.instance.UpdateRegistry(station.NetworkID, station.massStorageCrate, item, -1, stock);
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "SetHighStock", stock.ToString(), item, station, 0f);
+        FreightCartWindow.dirty = true;
+        station.MarkDirtyDelayed();
+    }
+
+    public static void SetCartAssignment(FreightCartStation station, int assignedcarts)
+    {
+        station.AssignedCarts = assignedcarts;
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "AssignCart", assignedcarts.ToString(), null, station, 0f);
+        FreightCartWindow.dirty = true;
+        station.MarkDirtyDelayed();
+    }
+
+    public static void ToggleLoadStatus(FreightCartStation station, string loadwhenfull)
+    {
+        station.mbWaitForFullLoad = loadwhenfull == "Full" ? true : false;
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "ToggleLoad", loadwhenfull, null, station, 0f);
+        FreightCartWindow.dirty = true;
+        station.MarkDirtyDelayed();
+    }
+
+    public static void AddRegistry(FreightCartStation station, ItemBase item)
+    {
+        if (item == null)
+            Debug.LogWarning("Freight cart window trying to add registry for null item!");
+        FreightCartManager.instance.AddRegistry(station.NetworkID, station.massStorageCrate, item, 0, 0);
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "AddRegistry", null, item, station, 0f);
+        FreightCartWindow.networkredraw = true;
+        station.MarkDirtyDelayed();
+    }
+
+    public static void SetNetwork(FreightCartStation station, string networkid)
+    {
+        string oldid = station.NetworkID;
+        if (!string.IsNullOrEmpty(networkid))
+        {
+            if (!string.IsNullOrEmpty(oldid))
+                FreightCartManager.instance.RemoveStationReg(station);
+            station.NetworkID = networkid;
+            FreightCartManager.instance.TryRegisterStation(station);
+        }
+        FreightCartManager.instance.AddNetwork(station.NetworkID);
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "SetNetwork", networkid, null, station, 0f);
+        FreightCartWindow.networkredraw = true;
+        station.MarkDirtyDelayed();
+    }
+
+    //Copy and paste is currently global for all players - one players copy will overwrite the last
+    //This may lead to unintuitive results where two players try to copy and paste freight entries
+    //In the future I could build a dictionary in FreightCartManager to store the copied freight for each player so they have their own instance that is also network sync'd
+
+    public static void CopyFreight(FreightCartStation source)
+    {
+        FreightCartManager.instance.CopyFreightEntries(source);
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "CopyFreight", null, null, source, 0f);
+        FreightCartWindow.networkredraw = true;
+    }
+
+    public static void PasteFreight(FreightCartStation destination)
+    {
+        FreightCartManager.instance.PasteFreightEntries(destination.NetworkID, destination.massStorageCrate);
+        if (!WorldScript.mbIsServer)
+            NetworkManager.instance.SendInterfaceCommand("FreightCartWindow", "PasteFreight", null, null, destination, 0f);
+        FreightCartWindow.networkredraw = true;
+        destination.MarkDirtyDelayed();
     }
 
     public override void OnClose(SegmentEntity targetEntity)
@@ -436,6 +586,7 @@ public class FreightCartWindow : BaseMachineWindow
         this.SearchResults = null;
         this.ItemSearchWindow = false;
         this.SetNetworkID = false;
+        this.SetFreightItems = false;
         this.EntryString = "";
         UIManager.mbEditingTextField = false;
         UIManager.RemoveUIRules("TextEntry");
@@ -449,10 +600,36 @@ public class FreightCartWindow : BaseMachineWindow
         string command = nic.command;
         if (command != null)
         {
-            if (command == "test")
+            if (command == "RemoveReg")
+                FreightCartWindow.RemoveRegistry(station, nic.itemContext);
+            else if (command == "SetLowStock")
             {
-                // do whatever
+                int stock = -1;
+                int.TryParse(nic.payload ?? "-1", out stock);
+                FreightCartWindow.SetLowStock(station, nic.itemContext, stock);
             }
+            else if (command == "SetHighStock")
+            {
+                int stock = -1;
+                int.TryParse(nic.payload ?? "-1", out stock);
+                FreightCartWindow.SetHighStock(station, nic.itemContext, stock);
+            }
+            else if (command == "AssignCart")
+            {
+                int carts = 0;
+                int.TryParse(nic.payload ?? "0", out carts);
+                FreightCartWindow.SetCartAssignment(station, carts);
+            }
+            else if (command == "ToggleLoad")
+                FreightCartWindow.ToggleLoadStatus(station, nic.payload);
+            else if (command == "AddRegistry")
+                FreightCartWindow.AddRegistry(station, nic.itemContext);
+            else if (command == "SetNetwork")
+                FreightCartWindow.SetNetwork(station, nic.payload);
+            else if (command == "CopyFreight")
+                FreightCartWindow.CopyFreight(station);
+            else if (command == "PasteFreight")
+                FreightCartWindow.PasteFreight(station);
         }
 
         return new NetworkInterfaceResponse

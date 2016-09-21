@@ -13,13 +13,13 @@ public class SystemMonitorWindow : BaseMachineWindow
     private bool SelNetwork = false;
     private int SelectedNetwork = 0;
     private List<FreightRegistry> Registries;
-    private FreightCartManager fcm = FreightCartManager.instance;
+    public static FreightCartManager fcm = FreightCartManager.instance;
     private Dictionary<ItemBase, int> FullInventory;
-    private int RefreshCounter;
+    private int RefreshCounter;  //Use this someday to refresh the stock window?
     private Vector3 StartPos;
     private bool firstopen;
     private bool OrderByName = true;
-    private bool CompactLayout = false;
+    private bool CompactLayout = true;
 
     public override void SpawnWindow(SegmentEntity targetEntity)
     {
@@ -34,8 +34,10 @@ public class SystemMonitorWindow : BaseMachineWindow
         }
         UIUtil.UIdelay = 0;
         UIUtil.UILock = true;
-
-        if (this.SelectedNetwork >= this.fcm.Networks.Count)
+        Debug.LogWarning("first area test fsm");
+        if (fcm == null)
+            Debug.LogWarning("Freight cart manager instance is null!!");
+        if (fcm != null && this.SelectedNetwork >= fcm.Networks.Count)
             this.SelectedNetwork = 0;
         if (!firstopen)
         {
@@ -59,7 +61,6 @@ public class SystemMonitorWindow : BaseMachineWindow
 
             this.firstopen = true;
         }
-
         if (!this.DisplayAll && !this.SelNetwork)
         {
             this.manager.SetTitle("Freight System Status");
@@ -82,14 +83,14 @@ public class SystemMonitorWindow : BaseMachineWindow
 
             this.Registries = new List<FreightRegistry>();
             //this.FullInventory = new Dictionary<ItemBase, int>(new ItemBaseComparer());
-            if (this.fcm.Networks != null && this.fcm.Networks.Count >= this.SelectedNetwork)
+            if (fcm.Networks != null && fcm.Networks.Count > this.SelectedNetwork)
             {
-                this.Registries = this.fcm.MasterRegistry.FindAll(x => x.NetworkID == this.fcm.Networks[this.SelectedNetwork] && x.MassStorage == null).ToList();
+                this.Registries = fcm.MasterRegistry.FindAll(x => x.NetworkID == fcm.Networks[this.SelectedNetwork] && x.MassStorage == null).ToList();
                 count = Registries.Count;
                 //Debug.Log("After registeries counting " + count);
                 this.manager.AddBigLabel("nameofnetworktitle", "Viewing status of freight network: ", Color.cyan, 350, 50);
-                this.manager.AddBigLabel("nameofnetwork", this.fcm.Networks[this.SelectedNetwork], Color.cyan, 650, 50);
-                //Debug.Log("Spawning window with network: " + this.fcm.Networks[this.SelectedNetwork]);
+                this.manager.AddBigLabel("nameofnetwork", fcm.Networks[this.SelectedNetwork], Color.cyan, 650, 50);
+                //Debug.Log("Spawning window with network: " + fcm.Networks[this.SelectedNetwork]);
                 for (int n = 0; n < count; n++)
                 {
                     //Debug.Log("Catch error at n = " + n);
@@ -107,7 +108,7 @@ public class SystemMonitorWindow : BaseMachineWindow
             }
             else
             {
-                this.manager.AddBigLabel("loadingnetworks", "Looking for Freight Networks...", Color.white, 225, 250);
+                this.manager.AddBigLabel("loadingnetworks", "No Freight Networks found...", Color.white, 225, 250);
             }
         }
         else if (this.SelNetwork)
@@ -118,9 +119,9 @@ public class SystemMonitorWindow : BaseMachineWindow
             int spacing = 50; //Spacing between each registry line
             int yoffset = 65; //Offset below button row
 
-            for (int n = 0; n < this.fcm.Networks.Count; n++)
+            for (int n = 0; n < fcm.Networks.Count; n++)
             {
-                this.manager.AddButton("networknum" + n, this.fcm.Networks[n], 500, yoffset + (n * spacing));
+                this.manager.AddButton("networknum" + n, fcm.Networks[n], 500, yoffset + (n * spacing));
             }
         }
         else //Display all
@@ -135,8 +136,8 @@ public class SystemMonitorWindow : BaseMachineWindow
             this.manager.AddButton("ordercount", "Order By Count", globalxoffset + buttonoffset + 2*buttonspacing, 0);
             this.manager.AddButton("togglelayout", "Toggle Layout", globalxoffset + buttonoffset + 3*buttonspacing, 0);
 
-            this.fcm.CalculateGlobalInventory();
-            int count = this.fcm.GlobalInventory.Count;
+            fcm.CalculateGlobalInventory();
+            int count = fcm.GlobalInventory.Count;
 
             if (CompactLayout)
             {
@@ -190,9 +191,9 @@ public class SystemMonitorWindow : BaseMachineWindow
 
         if (!this.DisplayAll && !this.SelNetwork)
         {
-            if (this.fcm.Networks != null && this.fcm.Networks.Count >= this.SelectedNetwork)
+            if (fcm.Networks != null && fcm.Networks.Count >= this.SelectedNetwork)
             {
-                string networkid = this.fcm.Networks[this.SelectedNetwork];
+                string networkid = fcm.Networks[this.SelectedNetwork];
 
                 int count;
                 count = this.Registries.Count;
@@ -218,18 +219,18 @@ public class SystemMonitorWindow : BaseMachineWindow
         }
         else if (this.DisplayAll)
         {
-            int count = this.fcm.GlobalInventory.Count;
+            int count = fcm.GlobalInventory.Count;
             if (this.OrderByName)
-                this.fcm.OrderyInvByName();
+                fcm.OrderyInvByName();
             else
-                this.fcm.OrderInvByCount();
+                fcm.OrderInvByCount();
 
             for (int n = 0; n < count; n++)
             {
-                ItemBase item = this.fcm.GlobalInventory[n].Key;
+                ItemBase item = fcm.GlobalInventory[n].Key;
                 string iconname = ItemManager.GetItemIcon(item);
                 string itemname = ItemManager.GetItemName(item);
-                int itemcount = this.fcm.GlobalInventory[n].Value;
+                int itemcount = fcm.GlobalInventory[n].Value;
                 string iteminfo = (itemcount.ToString("N0") + "x " + itemname);
                 iteminfo = iteminfo.Substring(0, 35 > iteminfo.Length ? iteminfo.Length : 35);
 
@@ -278,7 +279,7 @@ public class SystemMonitorWindow : BaseMachineWindow
         if (name.Contains("nextnetwork")) // Increment network count
         {
             this.SelectedNetwork++;
-            if (this.SelectedNetwork >= this.fcm.Networks.Count)
+            if (this.SelectedNetwork >= fcm.Networks.Count)
                 this.SelectedNetwork = 0;
             this.manager.RedrawWindow();
             return true;
@@ -287,7 +288,7 @@ public class SystemMonitorWindow : BaseMachineWindow
         {
             this.SelectedNetwork--;
             if (this.SelectedNetwork < 0)
-                this.SelectedNetwork = this.fcm.Networks.Count - 1;
+                this.SelectedNetwork = fcm.Networks.Count - 1;
             this.manager.RedrawWindow();
             return true;
         }
@@ -376,8 +377,8 @@ public class SystemMonitorWindow : BaseMachineWindow
         int.TryParse(name.Replace("itemicon", ""), out slotNum); //Get slot name as number
         if (slotNum > -1)
         {
-            itemForSlot = this.fcm.GlobalInventory[slotNum].Key;
-            count = this.fcm.GlobalInventory[slotNum].Value;
+            itemForSlot = fcm.GlobalInventory[slotNum].Key;
+            count = fcm.GlobalInventory[slotNum].Value;
         }
         return itemForSlot;
     }

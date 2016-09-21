@@ -11,8 +11,8 @@ public class FreightSystemMonitor : MachineEntity
     private SystemMonitorWindow MonitorPanel = new SystemMonitorWindow();
     private bool testlock = false;
 
-    public FreightSystemMonitor(Segment segment, long x, long y, long z, ushort cube, byte flags, ushort value, bool loadfromdisk)
-        : base(eSegmentEntity.Mod, SpawnableObjectEnum.AutoBuilder, x, y, z, cube, flags, value, Vector3.zero, segment)
+    public FreightSystemMonitor(ModCreateSegmentEntityParameters parameters)
+        : base(parameters)
     {
         this.mbNeedsLowFrequencyUpdate = true;
         this.mbNeedsUnityUpdate = true;
@@ -27,6 +27,13 @@ public class FreightSystemMonitor : MachineEntity
             FreightCartManager.instance.DebugFreight();
             FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Freight Registry Written to Output Log.", Color.yellow, 2f, 64f);
         }
+        if (Input.GetKeyDown(KeyCode.LeftControl) && Input.GetKey(KeyCode.RightControl) || Input.GetButtonDown("Extract"))
+        {
+            Debug.LogWarning("------------FREIGHT CART DEBUG---------------\nTotal Freight carts spawned: " + ManagerSync.instance.CartCounter.ToString());
+            FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Total Freight Carts Spawned: " + ManagerSync.instance.CartCounter.ToString(), Color.yellow, 2f, 64f);
+            FreightCartMod.LiveUpdateTime = FreightCartMod.Update;
+            FreightCartMod.monitor = this;
+        }
         //if (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.RightAlt))
         //{
         //    System.Random random = new System.Random();
@@ -37,9 +44,10 @@ public class FreightSystemMonitor : MachineEntity
 
 
         string str1 = "Freight System Monitor\n";
-        string str2 = "Press E to access Freight System Status";
+        string str2 = "Press E to access Freight System Status\n";
+        string str3 = "Press Q to display global cart status";
 
-        return str1 + str2;
+        return str1 + str2 + str3;
     }
 
     public override void DropGameObject()

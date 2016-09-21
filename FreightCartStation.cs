@@ -7,6 +7,8 @@ using System.IO;
 
 public class FreightCartStation : MachineEntity
 {
+    public int StationID;
+    public static int FreightStationIDs = 0;
     public float mrMaxPower = 100f;
     public float mrMaxTransferRate = 100f;
     public const int BOOST_VALUE = 2;
@@ -38,11 +40,6 @@ public class FreightCartStation : MachineEntity
     public List<FreightRegistry> localregistry;
     private bool RegWriteRequired = false;
 
-    private bool TextEntryMode = false;
-    private string EntryString = "";
-    private float CursorTimer = 0.0f;
-    private bool chatwindowclose = false;
-
     public MassStorageCrate LocalCrate;
     public MassStorageCrate massStorageCrate;
     public MassInventory ConnectedInventory;
@@ -54,16 +51,23 @@ public class FreightCartStation : MachineEntity
     public List<FreightRegistry> LocalDeficits = new List<FreightRegistry>();
     public List<FreightRegistry> LocalSurplus = new List<FreightRegistry>();
 
-    public MobEntity SpawnedCart;
+    public FreightTrackJunction ClosestJunction;
+    public int JunctionDirection = -1;
+    public int AssignedCarts;
+    public int AvailableCarts;
 
-    public FreightCartStation(Segment segment, long x, long y, long z, ushort cube, byte flags, ushort value, bool loadfromdisk)
-        : base(eSegmentEntity.Mod, SpawnableObjectEnum.Minecart_Track_LoadStation, x, y, z, cube, flags, value, Vector3.zero, segment)
+    //public MobEntity SpawnedCart;
+
+    public FreightCartStation(ModCreateSegmentEntityParameters parameters)
+        : base(parameters)
     {
         this.mbNeedsLowFrequencyUpdate = true;
         this.mbNeedsUnityUpdate = true;
-        this.mForwards = SegmentCustomRenderer.GetRotationQuaternion(flags) * Vector3.forward;
+        this.mForwards = SegmentCustomRenderer.GetRotationQuaternion(parameters.Flags) * Vector3.forward;
         this.mForwards.Normalize();
         this.mbWaitForFullLoad = false;
+        this.StationID = FreightStationIDs;
+        FreightStationIDs++;
         //this.maAttachedHoppers = new StorageHopper[6];
     }
 
@@ -102,7 +106,7 @@ public class FreightCartStation : MachineEntity
 
         UIUtil.HandleThisMachineWindow(this, this.machineWindow);
 
-        string str1 = "Freight Cart Station";
+        string str1 = "Freight Cart Station (ID: " + this.StationID.ToString() + ")";
         if (string.IsNullOrEmpty(this.NetworkID))
             str1 += " - NO NETWORK\nPress E to configure this station\n";
         else
@@ -145,6 +149,12 @@ public class FreightCartStation : MachineEntity
             }
         }
 
+
+        //Freight registry copy+paste
+        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetButtonDown("Extract") && this.massStorageCrate != null && !string.IsNullOrEmpty(this.NetworkID))
+            FreightCartWindow.CopyFreight(this);
+        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetButtonDown("Store") && this.massStorageCrate != null && !string.IsNullOrEmpty(this.NetworkID) && FreightCartManager.instance.CopiedFreightStation != null)
+            FreightCartWindow.PasteFreight(this);
 
         string str4 = "";
         string str5 = "\n";
@@ -412,6 +422,8 @@ public class FreightCartStation : MachineEntity
 
     public void MassStorageChecks()
     {
+        if (FreightCartManager.instance == null)
+            return;
         //No center or local crate -> most likely only to occur on start 
         if (this.massStorageCrate == null && this.LocalCrate == null)
         {
@@ -436,11 +448,11 @@ public class FreightCartStation : MachineEntity
                 return;
             else if (FreightCartManager.instance.InventoryExists(this.LocalCrate.GetCenter()) != null) //linked to a new center that already exists
             {
-                this.ConnectedInventory = FreightCartManager.instance.InventoryExists(this.LocalCrate.GetCenter());
+                this.ConnectedInventory = null;
                 this.massStorageCrate = this.LocalCrate.GetCenter();
                 return;
             }
-            else //new center isn't registered so copy old to new
+            else if (!string.IsNullOrEmpty(this.NetworkID)) //new center isn't registered so copy old to new
             {
                 FreightCartManager.instance.ReassignFreightRegistry(this.NetworkID, this.massStorageCrate, this.LocalCrate.GetCenter());
                 this.massStorageCrate = this.LocalCrate.GetCenter();
@@ -453,13 +465,13 @@ public class FreightCartStation : MachineEntity
         {
             if (FreightCartManager.instance.InventoryExists(this.LocalCrate.GetCenter()) != null) //linked to a new center that already exists
             {
-                this.ConnectedInventory = FreightCartManager.instance.InventoryExists(this.LocalCrate.GetCenter());
+                this.ConnectedInventory = null;
                 this.massStorageCrate = this.LocalCrate.GetCenter();
                 return;
             }
             else //new center isn't registered so copy old to new
             {
-                if (this.massStorageCrate != null && this.LocalCrate != null)
+                if (this.massStorageCrate != null && this.LocalCrate != null && !string.IsNullOrEmpty(this.NetworkID))
                 {
                     FreightCartManager.instance.ReassignFreightRegistry(this.NetworkID, this.massStorageCrate, this.LocalCrate.GetCenter());
                     this.massStorageCrate = this.LocalCrate.GetCenter();
@@ -472,14 +484,30 @@ public class FreightCartStation : MachineEntity
             if (this.massStorageCrate.mnX == this.cratex && this.massStorageCrate.mnY == this.cratey && this.massStorageCrate.mnZ == this.cratez)
                 this.WriteLocalRegToMaster();
         }
+        //Debug.LogWarning("FCS just before checking if mass inventory is null Station ID: " + this.StationID.ToString());
         if (this.ConnectedInventory == null)
-            this.CheckNetworkReg();
+            this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
+        //else
+        //{
+        //    Debug.LogWarning("Connected inventory station count: " + this.ConnectedInventory.ConnectedStations.Count);
+        //    if (this.ConnectedInventory.ConnectedStations.Count > 0)
+        //        Debug.LogWarning("Connected inventory station id: " + this.ConnectedInventory.ConnectedStations[0].StationID.ToString());
+        //    else
+        //    {
+        //        Debug.LogWarning("Conencted inventory had no stations so resetting the stations inventory to reregister");
+        //        this.ConnectedInventory = null;
+        //    }
+        //}
     }
 
     public void CheckNetworkReg()
     {
-        if (this.massStorageCrate != null && !string.IsNullOrEmpty(this.NetworkID))
+        //Debug.LogWarning("Station ID: " + this.StationID.ToString() + " is checking is network reg");
+        if (!FreightCartManager.instance.IsRegistered(this))
+        {
+            //Debug.LogWarning("Station is not registered");
             this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
+        }
     }
 
     public int DepositItem(ItemBase item)
@@ -746,7 +774,7 @@ public class FreightCartStation : MachineEntity
 
     public override int GetVersion()
     {
-        return 0;
+        return 1;
     }
 
     public override bool ShouldSave()
@@ -771,6 +799,64 @@ public class FreightCartStation : MachineEntity
             return massStorageCrate;
         }
         return null;
+    }
+
+    public override bool ShouldNetworkUpdate()
+    {
+        return true;
+    }
+
+    public override void WriteNetworkUpdate(BinaryWriter writer)
+    {
+        if (!string.IsNullOrEmpty(this.NetworkID))
+            writer.Write(this.NetworkID);
+        else
+            writer.Write(string.Empty);
+
+        List<FreightRegistry> registries = new List<FreightRegistry>();
+        if (this.massStorageCrate != null && this.NetworkID != null)
+            registries = FreightCartManager.instance.GetFreightEntries(this.NetworkID, this.massStorageCrate);
+        writer.Write(registries.Count);
+        for (int index = 0; index < registries.Count; index++)
+        {
+            ItemFile.SerialiseItem(registries[index].FreightItem, writer);
+            writer.Write(registries[index].LowStock);
+            writer.Write(registries[index].HighStock);
+        }
+    }
+
+    public override void ReadNetworkUpdate(BinaryReader reader)
+    {
+        this.NetworkID = reader.ReadString();
+        if (this.NetworkID == string.Empty)
+            this.NetworkID = null;
+
+        List<FreightRegistry> registries = new List<FreightRegistry>();
+        if (this.massStorageCrate != null && this.NetworkID != null)
+            registries = FreightCartManager.instance.GetFreightEntries(this.NetworkID, this.massStorageCrate);
+
+        this.localregistry = new List<FreightRegistry>();
+        bool safereg = true;
+        int count = reader.ReadInt32();
+
+        if (count != 0 && string.IsNullOrEmpty(this.NetworkID))
+        {
+            Debug.LogWarning("Found registry entries but no network ID!");
+            safereg = false;
+        }
+        for (int index = 0; index < count; index++)
+        {
+            ItemBase item = ItemFile.DeserialiseItem(reader);
+            int LowStock = reader.ReadInt32();
+            int HighStock = reader.ReadInt32();
+            if (safereg)
+                this.localregistry.Add(new FreightRegistry(this.NetworkID, null, item, LowStock, HighStock));
+            else
+                this.localregistry.Add(new FreightRegistry(null, null, item, LowStock, HighStock));
+        }
+        if (this.localregistry != null && registries.Count != this.localregistry.Count)
+            this.RegWriteRequired = true;
+        this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
     }
 
     public override void Write(BinaryWriter writer)
@@ -811,6 +897,9 @@ public class FreightCartStation : MachineEntity
             writer.Write(registries[index].LowStock);
             writer.Write(registries[index].HighStock);
         }
+
+        writer.Write(this.AssignedCarts);
+        writer.Write(this.mbWaitForFullLoad);
     }
 
     public override void Read(BinaryReader reader, int entityVersion)
@@ -863,6 +952,12 @@ public class FreightCartStation : MachineEntity
 
         //Check if the storage has been registered and add it if missing
         this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
+
+        if (entityVersion == 1)
+        {
+            this.AssignedCarts = reader.ReadInt32();
+            this.mbWaitForFullLoad = reader.ReadBoolean();
+        }
     }
 
     public override HoloMachineEntity CreateHolobaseEntity(Holobase holobase)

@@ -10,6 +10,7 @@ public class FreightCartManager
     public static FreightCartManager instance = null;
     public List<FreightRegistry> MasterRegistry;
     public List<FreightRegistry> CopiedFreight;
+    public FreightCartStation CopiedFreightStation;
     public List<MassInventory> StationInventories;
     public List<MassInventory> OldDeficits;
     public List<MassInventory> NetworkStock;
@@ -21,6 +22,7 @@ public class FreightCartManager
     {
         Debug.Log("Freight Cart Manager created on thread id: " + Thread.CurrentThread.ManagedThreadId + " LFG thread ID: " + LowFrequencyThread.mnThreadId);
         instance = this;
+        SystemMonitorWindow.fcm = this;
         this.MasterRegistry = new List<FreightRegistry>();
         this.NetworkStock = new List<MassInventory>();
         this.NetworkDeficit = new List<MassInventory>();
@@ -28,10 +30,10 @@ public class FreightCartManager
         this.OldDeficits = new List<MassInventory>();
         this.Networks = new List<string>();
         this.GlobalInventory = new List<KeyValuePair<ItemBase, int>>();
-        GameObject Sync = new GameObject("ManagerSync");
-        Sync.AddComponent<ManagerSync>();
-        Sync.SetActive(true);
-        Sync.GetComponent<ManagerSync>().enabled = true;
+        //GameObject Sync = new GameObject("ManagerSync");
+        //Sync.AddComponent<ManagerSync>();
+        //Sync.SetActive(true);
+        //Sync.GetComponent<ManagerSync>().enabled = true;
     }
 
     public void DebugFreight()
@@ -99,15 +101,16 @@ public class FreightCartManager
         }
     }
 
-    public void CopyFreightEntries(string networkid, MassStorageCrate crate)
+    public void CopyFreightEntries(FreightCartStation station)
     {
         //Search for all entries for this station and save to this.CopiedFreight 
-        if (crate == null)
+        if (station == null || station.massStorageCrate == null || string.IsNullOrEmpty(station.NetworkID))
         {
-            Debug.LogWarning("CopyFreightEntries tried to copy from null crate");
+            Debug.LogWarning("CopyFreightEntries tried to copy from null crate or station");
             return;
         }
-        this.CopiedFreight = MasterRegistry.FindAll(x => x.MassStorage == crate && x.NetworkID == networkid).ToList();
+        this.CopiedFreightStation = station;
+        this.CopiedFreight = MasterRegistry.FindAll(x => x.MassStorage == station.massStorageCrate && x.NetworkID == station.NetworkID).ToList();
     }
 
     public void PasteFreightEntries(string networkid, MassStorageCrate crate)
@@ -166,6 +169,7 @@ public class FreightCartManager
                  inv = new MassInventory(station.massStorageCrate, station.NetworkID);
             if (currentinv == null)
             {
+                inv.ConnectedStations.Add(station);
                 this.StationInventories.Add(inv);
                 return inv;
             }
@@ -177,20 +181,25 @@ public class FreightCartManager
             else
             {
                 Debug.LogWarning("TryRegister failed to register freight cart station.");
+                return null;
             }
         }
-        return this.StationInventories.Where(x => x.MassStorage == station.massStorageCrate).FirstOrDefault();
+        return this.StationInventories.Where(x => x.MassStorage == station.massStorageCrate && x.ConnectedStations.Contains(station)).FirstOrDefault();
     }
 
     public void RemoveStationReg(FreightCartStation station)
     {
+        if (station.massStorageCrate == null || station.NetworkID == null)
+            return;
         MassStorageCrate crate = station.massStorageCrate;
         string networkid = station.NetworkID;
         if (crate != null && !string.IsNullOrEmpty(networkid))
         {
-            MasterRegistry.RemoveAll(x => x.MassStorage == crate && x.NetworkID == networkid);
+            if (!StationInventories.Exists(x => x.MassStorage == crate && x.ConnectedStations.Exists(y => y.NetworkID == networkid && y != station)))
+                MasterRegistry.RemoveAll(x => x.MassStorage == crate && x.NetworkID == networkid);
         }
-        this.StationInventories.ForEach(x => x.ConnectedStations.RemoveAll(y => y == station));
+        station.ConnectedInventory.ConnectedStations.Remove(station);
+        //this.StationInventories.ForEach(x => x.ConnectedStations.RemoveAll(y => y == station));
         this.RemoveExtraNetwork(networkid);
     }
 
@@ -204,6 +213,15 @@ public class FreightCartManager
         return true;
     }
 
+    /// <summary>
+    ///     Update the low/high stock limits for a freight entry
+    /// </summary>
+    /// <param name="networkid">Freight network ID</param>
+    /// <param name="crate">Mass storage crate of the freight entry</param>
+    /// <param name="item">Freight Item</param>
+    /// <param name="lowstock">Low stock limit (-1 will skip writing the entry)</param>
+    /// <param name="highstock">High stock limit (-1 will skip writing the entry)</param>
+    /// <returns>True if it completes the write without error</returns>
     public bool UpdateRegistry(string networkid, MassStorageCrate crate, ItemBase item, int lowstock, int highstock)
     {
         if (!MasterRegistry.Exists(x => x.MassStorage == crate && x.FreightItem.Compare(item) && x.NetworkID == networkid))
@@ -214,8 +232,10 @@ public class FreightCartManager
             Debug.LogWarning("UpdateRegistry tried to update a missing registry");
             return false;
         }
-        MasterRegistry[index].LowStock = lowstock;
-        MasterRegistry[index].HighStock = highstock;
+        if (lowstock != -1)
+            MasterRegistry[index].LowStock = lowstock;
+        if (highstock != -1)
+            MasterRegistry[index].HighStock = highstock;
         return true;
     }
 
@@ -247,13 +267,19 @@ public class FreightCartManager
 
 
     //Functions for tracking number of items already in the freight system
-    public void NetworkAdd(string networkid, ItemBase item, int amount)
+    public bool NetworkAdd(string networkid, ItemBase item, int amount)
     {
+        //Debug.LogWarning("Adding to network: " + networkid + " item: " + item.ToString() + " amount: " + amount.ToString());
         FreightRegistry reg = this.MasterRegistry.Where(x => x.NetworkID == networkid && x.FreightItem.Compare(item) && x.MassStorage == null).FirstOrDefault();
         if (reg != null)
             reg.Stock += amount;
         else
-            Debug.LogWarning("FreightCartManager network tried to add item to stock that doesn't exist in freight registry");
+        {
+            //Debug logging removed now that carts will try to add to registry on load and will likely not fird it
+            //Debug.LogWarning("FreightCartManager network tried to add item to stock that doesn't exist in freight registry");
+            return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -332,6 +358,111 @@ public class FreightCartManager
         return available;
     }
 
+    /// <summary>
+    ///     Gets the network with the highest rating for deficit/surplus that a cart can help satisfy
+    /// </summary>
+    /// <returns>The network ID</returns>
+    public string GetNeedyNetwork()
+    {
+        List<FreightRegistry> reg = this.MasterRegistry.Where(x => x.MassStorage == null).ToList();
+        int count = reg.Count;
+        float maxval = 0;
+        string network = "";
+        for (int n = 0; n < count; n++)
+        {
+            int surplus = reg[n].Surplus;
+            int deficit = reg[n].Deficit;
+            float testval = (float)(deficit + surplus) / System.Math.Abs(deficit - surplus);
+            if (testval > maxval && surplus > 0)
+            {
+                maxval = testval;
+                network = reg[n].NetworkID;
+            }
+        }
+        return network;
+    }
+
+    public FreightCartStation GetNeedyStation()
+    {
+        string networkid = this.GetNeedyNetwork();
+        return this.GetStation(networkid, null);
+    }
+
+    /// <summary>
+    ///     Gets a freight cart station that is offering/requesting the item on the network
+    /// </summary>
+    /// <param name="networkid">On this network</param>
+    /// <param name="item">This item type for delivery - search for any offer if item is null</param>
+    /// <returns>The station</returns>
+    public FreightCartStation GetStation(string networkid, ItemBase item)
+    {
+        //OMG please come up with something better!!
+
+        //Get all item registries for this network on all storages
+        List<FreightRegistry> reg = this.MasterRegistry.Where(x => x.NetworkID == networkid && x.MassStorage != null).ToList();
+        int count = reg.Count;
+        for (int n = 0; n < count; n++)
+        {
+            //Get the crate associated with the entry
+            FreightRegistry regentry = reg[n];
+            MassStorageCrate crate = regentry.MassStorage;
+            int count2 = this.StationInventories.Count;
+            //Debug.LogWarning("Registry entry: " + regentry.FreightItem.ToString() + " lowstock: " + regentry.LowStock.ToString() + " highstock: " + regentry.HighStock.ToString());
+            for (int m = 0; m < count2; m++)
+            {
+                //Alternate?
+                //this.StationInventories.Where(x => x.MassStorage == crate).SelectMany(x => x.ConnectedStations.Where(y => y.NetworkID == x.NetworkID)).ToList();
+                //Get the mass inventory that matches the crate 
+                MassInventory inv = this.StationInventories[m];
+                //if (inv.ConnectedStations.Count > 0)
+                //    Debug.LogWarning("Looping over inventories m: " + m.ToString() + " inventory station ID: " + inv.ConnectedStations[0].StationID.ToString());
+                //else
+                //    Debug.LogWarning("Station inventory doesn't have a connected station?");
+                if (inv.MassStorage == crate)
+                {
+                    int count3 = inv.ConnectedStations.Count;
+                    for (int p = 0; p < count3; p++)
+                    {
+                        //Check all of the connected stations
+                        FreightCartStation station = inv.ConnectedStations[p];
+                        //Debug.LogWarning("Current station being checked.  ID: " + station.StationID.ToString());
+                        if (station.NetworkID == networkid)
+                        {
+                            //Debug.LogWarning("FCM GetStation found a station with matching network id - station ID: " + station.StationID.ToString());
+                            //Debug.LogWarning("Total registry count: " + count.ToString() + " total inventories count: " + count2.ToString() + " total connected stations count: " + count3.ToString());
+                            //For the station that matches the network ID
+                            if (item == null)
+                            {
+                                List<KeyValuePair<ItemBase, int>> offers = this.GetStationOfferings(station);
+                                if (offers.Count > 0 && offers.Sum(x => x.Value) > 5)
+                                    return station;
+                            }
+                            else
+                            {
+                                List<KeyValuePair<ItemBase, int>> needs = this.GetStationNeeds(station);
+                                int count4 = needs.Count;
+                                //Debug.LogWarning("Station needs count: " + count4);
+                                List<FreightRegistry> regdeb = this.GetLocalDeficit(networkid, crate);
+                                if (regdeb.Count > 0)
+                                {
+                                    FreightRegistry regdebug = this.GetLocalDeficit(networkid, crate)[0];
+                                    //Debug.LogWarning("Station first local deficit: " + regdebug.Deficit.ToString() + " " + regdebug.FreightItem.ToString());
+                                }
+                                for (int q = 0; q < count4; q++)
+                                {
+                                    //Debug.LogWarning("Station needs in FCM GetStation: " + needs[q].Key.ToString());
+                                    if (needs[q].Key.Compare(item))
+                                        return station;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     public int GetDeficitFromRegistry(string networkid, MassStorageCrate crate, ItemBase item)
     {
         return this.MasterRegistry.Where(x => x.MassStorage == crate && x.FreightItem.Compare(item) && x.NetworkID == networkid).FirstOrDefault().Deficit;
@@ -367,7 +498,8 @@ public class FreightCartManager
         for (int index = 0; index < count; ++index)
         {
             //Distribute the load of updating each inventory while maintaining a reasonable refresh rate
-            if (index % 15 == ManagerSync.instance.Update % 15)
+            //if (index % 15 == ManagerSync.instance.Update % 15)
+            if (index % 15 == FreightCartMod.Update % 15)
             {
                 //New approach outline
                 //Crate == null implies the entry is for the network data associated with the networkid of the entry
@@ -449,26 +581,27 @@ public class ItemBaseComparer : IEqualityComparer<ItemBase>
 
 class ManagerSync : MonoBehaviour
 {
-    private int Counter;
-    public int Update;
+    //private int Counter;
+    //public int Update;
+    public int CartCounter = 0;
     public static ManagerSync instance = null;
     public static Queue<FreightCartMob> CartLoader = new Queue<FreightCartMob>();
 
     void Start()
     {
-        this.Counter = 0;
+        //this.Counter = 0;
         instance = this;
-        Debug.Log("Freight Cart Manager synchronizing counter started.");
+        Debug.Log("Freight Cart Manager Cart Initializer started.");
     }
 
     void FixedUpdate()
     {
-        this.Counter++;
-        if (this.Counter % 10 == 0)
-        {
-            this.Update++;
-            FreightCartManager.instance.UpdateMassInventory();
-        }
+        //this.Counter++;
+        //if (this.Counter % 10 == 0)
+        //{
+        //    this.Update++;
+        //    FreightCartManager.instance.UpdateMassInventory();
+        //}
 
         FreightCartMob mob = null;
         if (CartLoader.Count > 0)
@@ -480,6 +613,7 @@ class ManagerSync : MonoBehaviour
                 mob.mWrapper.mGameObjectList[0].AddComponent<FreightCartUnity>();
                 mob.mWrapper.mGameObjectList[0].gameObject.SetActive(true);
                 CartLoader.Dequeue();
+                this.CartCounter++;
             }
         }
     } 

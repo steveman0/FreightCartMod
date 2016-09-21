@@ -7,6 +7,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
+using System.Reflection;
 
 public class FreightCartUnity : MonoBehaviour
 {
@@ -75,36 +76,30 @@ public class FreightCartUnity : MonoBehaviour
             Extensions.Search(this.transform, "AprilFool").gameObject.SetActive(false);
         this.mAudio = this.GetComponent<AudioSource>();
         Material material = (Material)null;
-        if (this.mob.mType == MobType.Mod)
+        if (this.mob.mObjectType == SpawnableObjectEnum.Minecart_T1)
         {
-            if (Minecart_Unity.T4_Mat == null)
+            if ((UnityEngine.Object)Minecart_Unity.T1_Mat == (UnityEngine.Object)null)
+                Minecart_Unity.T1_Mat = Resources.Load("DynamicTextures/Minecart_dif") as Material;
+            material = Minecart_Unity.T1_Mat;
+        }
+        if (this.mob.mObjectType == SpawnableObjectEnum.Minecart_T2)
+        {
+            if ((UnityEngine.Object)Minecart_Unity.T2_Mat == (UnityEngine.Object)null)
+                Minecart_Unity.T2_Mat = Resources.Load("DynamicTextures/Minecart_dif T2") as Material;
+            material = Minecart_Unity.T2_Mat;
+        }
+        if (this.mob.mObjectType == SpawnableObjectEnum.Minecart_T3)
+        {
+            if ((UnityEngine.Object)Minecart_Unity.T3_Mat == (UnityEngine.Object)null)
+                Minecart_Unity.T3_Mat = Resources.Load("DynamicTextures/Minecart_dif T3") as Material;
+            material = Minecart_Unity.T3_Mat;
+        }
+        if (this.mob.mObjectType == SpawnableObjectEnum.Minecart_T4)
+        {
+            if ((UnityEngine.Object)Minecart_Unity.T4_Mat == (UnityEngine.Object)null)
                 Minecart_Unity.T4_Mat = Resources.Load("DynamicTextures/Minecart_dif T4") as Material;
             material = Minecart_Unity.T4_Mat;
         }
-        //if (this.mob.mType == MobType.Minecart)
-        //{
-        //    if ((UnityEngine.Object)Minecart_Unity.T1_Mat == (UnityEngine.Object)null)
-        //        Minecart_Unity.T1_Mat = Resources.Load("DynamicTextures/Minecart_dif") as Material;
-        //    material = Minecart_Unity.T1_Mat;
-        //}
-        //if (this.mob.mType == MobType.Minecart_T2)
-        //{
-        //    if ((UnityEngine.Object)Minecart_Unity.T2_Mat == (UnityEngine.Object)null)
-        //        Minecart_Unity.T2_Mat = Resources.Load("DynamicTextures/Minecart_dif T2") as Material;
-        //    material = Minecart_Unity.T2_Mat;
-        //}
-        //if (this.mob.mType == MobType.Minecart_T3)
-        //{
-        //    if ((UnityEngine.Object)Minecart_Unity.T3_Mat == (UnityEngine.Object)null)
-        //        Minecart_Unity.T3_Mat = Resources.Load("DynamicTextures/Minecart_dif T3") as Material;
-        //    material = Minecart_Unity.T3_Mat;
-        //}
-        //if (this.mob.mType == MobType.Minecart_T4)
-        //{
-        //    if ((UnityEngine.Object)Minecart_Unity.T4_Mat == (UnityEngine.Object)null)
-        //        Minecart_Unity.T4_Mat = Resources.Load("DynamicTextures/Minecart_dif T4") as Material;
-        //    material = Minecart_Unity.T4_Mat;
-        //}
         if (material != null)
         {
             this.Door_L.GetComponent<Renderer>().material = material;
@@ -233,6 +228,11 @@ public class FreightCartUnity : MonoBehaviour
                 this.mLook.x = vector8.a;
                 this.mLook.y = vector8.b;
                 this.mLook.z = vector8.c;
+                if (this.mob.mObjectType == SpawnableObjectEnum.Minecart_T10 && this.mob.MinecartShell != null)
+                {
+                    this.mob.MinecartShell.gameObject.transform.position = new Vector3(vector8.x, vector8.y, vector8.z);
+                    this.mob.MinecartShell.gameObject.transform.forward = new Vector3(vector8.a, vector8.b, vector8.c);
+                }
                 if (this.mob.meLoadState == FreightCartMob.eLoadState.eLoading)
                     this.mLook.y = 0.0f;
                 if (this.mob.meLoadState == FreightCartMob.eLoadState.eUnloading)
@@ -365,7 +365,7 @@ public class FreightCartUnity : MonoBehaviour
         if (this.mbRenderer)
         {
             float num = 8f;
-            if (this.mob.mType != MobType.TourCart)
+            if (this.mob.mObjectType != SpawnableObjectEnum.Minecart_T10)
                 num = (float)((double)this.mob.mnUsedStorage / (double)this.mob.mnMaxStorage * 8.0);
             if ((double)this.mob.mDistanceToPlayer < (double)CamDetail.FPS)
             {
@@ -381,7 +381,7 @@ public class FreightCartUnity : MonoBehaviour
                 if ((double)this.mHoverLight.intensity < 0.100000001490116)
                     this.mHoverLight.enabled = false;
             }
-            if ((double)this.mob.mDistanceToPlayer < 64.0 && this.mob.mType != MobType.TourCart)
+            if ((double)this.mob.mDistanceToPlayer < 64.0 && this.mob.mObjectType != SpawnableObjectEnum.Minecart_T10)
             {
                 this.mrGlow += (num - this.mrGlow) * Time.deltaTime;
                 this.mMPB.SetFloat("_GlowMult", this.mrGlow);

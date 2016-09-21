@@ -1,6 +1,7 @@
 ﻿using System.Linq;
 using System.Collections.Generic;
 using System.IO;
+using System;
 using UnityEngine;
 using FortressCraft.Community.Utilities;
 
@@ -23,6 +24,7 @@ class FreightCartMob : MobEntity
     private static int MineCartID;
     public float mrVisualLoadTimer;
     public ConcurrentQueue<Vector8> maCartPositions;
+
     private float lrTimer;
     private int mnUpdatesPerTick;
     private float mrSpeedPerTick;
@@ -33,6 +35,8 @@ class FreightCartMob : MobEntity
     private Segment mPrevGetSeg;
 
     public static ushort FreightStationType = ModManager.mModMappings.CubesByKey["steveman0.FreightCartStation"].CubeType;
+    public static ushort TourStationType = ModManager.mModMappings.CubesByKey["steveman0.TourCartStation"].CubeType;
+    public static ushort JunctionType = ModManager.mModMappings.CubesByKey["steveman0.TrackJunction"].CubeType;
     public static ushort FreightStationValue = 0;
     public Dictionary<string, MachineInventory> LocalInventory = new Dictionary<string, MachineInventory>();
     public MachineInventory TransferInventory;
@@ -40,9 +44,21 @@ class FreightCartMob : MobEntity
     List<KeyValuePair<ItemBase, int>> StationOfferings;
     public bool LoadCheckIn = false;
     public bool LoadCheckOut = false;
+    public bool FullEscape = false;
+    public bool EmptyEscape = false;
+    public bool CartCheckin = false;
+    private bool TransitCheckIn = true;
+
+    public FreightTrackJunction LastJunction;
+    public FreightTrackJunction NextJunction;
+    public FreightTrackJunction DestinationJunction;
+    public Stack<FreightTrackJunction> JunctionRoute = new Stack<FreightTrackJunction>();
+    public int DestinationDirection = -1;
+    public FreightCartStation AssignedStation;
+    public Minecart_Unity MinecartShell;
 
     public FreightCartMob(FreightCartMob.eMinecartType leType, ModCreateMobParameters modmobtype)
-    : base(MobType.Mod, modmobtype.MobNumber, SpawnableObjectEnum.Minecart_T3)
+    : base(modmobtype, SpawnableObjectEnum.Minecart_T3)
   {
         ++FreightCartMob.MineCartID;
         this.rand = new System.Random();
@@ -85,6 +101,8 @@ class FreightCartMob : MobEntity
             this.mObjectType = SpawnableObjectEnum.Minecart_T3;
         if (this.meType == FreightCartMob.eMinecartType.FreightCart_T4)
             this.mObjectType = SpawnableObjectEnum.Minecart_T4;
+        if (this.meType == FreightCartMob.eMinecartType.FreightCartTour)
+            this.mObjectType = SpawnableObjectEnum.Minecart_T10;
 
         if (this.meType == FreightCartMob.eMinecartType.FreightCartMK1)
             this.mObjectType = SpawnableObjectEnum.Minecart_T4;
@@ -151,6 +169,13 @@ class FreightCartMob : MobEntity
             this.mnMaxStorage = 50;
             this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
         }
+        if (this.meType == FreightCartMob.eMinecartType.FreightCartTour)
+        {
+            this.mrSpeedScalar = 4f;
+            this.mnMaxStorage = 0;
+            this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
+            this.MinecartShell = new Minecart_Unity();
+        }
 
         //if (this.meType == FreightCartMob.eMinecartType.Basic)
         //{
@@ -194,6 +219,16 @@ class FreightCartMob : MobEntity
 
     public override void MobUpdate()
     {
+        if (FreightCartMod.CartCheckin && !this.CartCheckin)
+        {
+            FreightCartMod.LiveCarts++;
+            this.CartCheckin = true;
+        }
+        else if (!FreightCartMod.CartCheckin && this.CartCheckin)
+            this.CartCheckin = false;
+
+        this.TransitCheck();
+
         ++this.mnUpdates;
         this.UpdatePlayerDistanceInfo();
         this.lrTimer -= MobUpdateThread.mrPreviousUpdateTimeStep;
@@ -225,6 +260,35 @@ class FreightCartMob : MobEntity
         this.ConfigSpeedTicks();
         for (this.mnCurrentUpdateTick = 0; this.mnCurrentUpdateTick < this.mnUpdatesPerTick; ++this.mnCurrentUpdateTick)
             this.UpdateMove(this.mrSpeedPerTick);
+    }
+
+    /// <summary>
+    ///     Registers the current inventory as 'in transit' on the network if the network registry wasn't loaded in the Master when the cart was loaded.
+    /// </summary>
+    private void TransitCheck()
+    {
+        if (!this.TransitCheckIn)
+        {
+            bool checkreg = true;
+            List<string> keys = this.LocalInventory.Keys.ToList();
+            int count = keys.Count;
+            for (int m = 0; m < count; m++)
+            {
+                string networkid = keys[m];
+                int count2 = this.LocalInventory[networkid].Inventory.Count;
+                for (int n = 0; n < count2; n++)
+                {
+                    ItemBase item = this.LocalInventory[networkid].Inventory[n];
+                    checkreg = FreightCartManager.instance.NetworkAdd(networkid, item, item.GetAmount());
+                    if (!checkreg)
+                    {
+                        this.TransitCheckIn = false;
+                        return;
+                    }
+                }
+            }
+            this.TransitCheckIn = true;
+        }
     }
 
     private void UpdateLoadStatus()
@@ -259,6 +323,8 @@ class FreightCartMob : MobEntity
             {
                 this.meLoadState = eLoadState.eLoading;
                 this.LoadCheckIn = false;
+                this.LoadCheckOut = false;
+                this.EmptyEscape = true;
             }
             else
             {
@@ -287,7 +353,18 @@ class FreightCartMob : MobEntity
                     else
                     {
                         Debug.LogWarning("Station failed to deposit item at FreightCart unload step. Returning to local inventory.");
-                        this.LocalInventory[this.NetworkID].AddItem(deposited.SetAmount(remainder));
+                        if (!string.IsNullOrEmpty(this.NetworkID) && this.LocalInventory.ContainsKey(this.NetworkID))
+                            this.LocalInventory[this.NetworkID].AddItem(deposited.SetAmount(remainder));
+                        else
+                        {
+                            if (!string.IsNullOrEmpty(this.NetworkID))
+                            {
+                                this.LocalInventory.Add(this.NetworkID, new MachineInventory(this, this.mnMaxStorage));
+                                this.LocalInventory[this.NetworkID].AddItem(deposited.SetAmount(remainder));
+                            }
+                            else
+                                Debug.LogWarning("NetworkID is null so we can't restore the item! Initialization error?");
+                        }
                     }
                     //this.CurrentNetworkStock.Inventory[deposited]--;
                     this.mrVisualLoadTimer = 1f;
@@ -297,7 +374,7 @@ class FreightCartMob : MobEntity
                     Debug.LogWarning("Freight cart still had items to transfer but lost mass storage! Remaining items: " + this.TransferInventory.ItemCount());
                 }
                 this.FCStation.mrCartOnUs = 1f;
-                this.FCStation.mrLastCartLeavTimer = this.mrLoadTimer;
+                //this.FCStation.mrLastCartLeavTimer = this.mrLoadTimer;
                 this.LoadCheckIn = true;
             }
         }
@@ -307,6 +384,7 @@ class FreightCartMob : MobEntity
     {
         if (string.IsNullOrEmpty(this.FCStation.NetworkID))
         {
+            this.FullEscape = false;
             this.LeaveStation();
         }
         else
@@ -314,8 +392,14 @@ class FreightCartMob : MobEntity
             this.mBlockOffset = Vector3.zero;
             if ((int)this.FCStation.mValue != FreightStationValue)
                 Debug.LogError(("Attempted to unload into the wrong type of station! (Expected FreightStationValue, got " + this.FCStation.mValue));
-            if (this.mnUsedStorage == this.mnMaxStorage || this.LoadCheckOut || this.mrLoadTimer > 30.0f)
+            if ((this.mnUsedStorage == this.mnMaxStorage || this.LoadCheckOut || this.mrLoadTimer > 30.0f) && !(FCStation.mbWaitForFullLoad && this.mnUsedStorage < this.mnMaxStorage))
             {
+                //if (this.LoadCheckOut)
+                //    FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 2L, this.mnZ, 1f, "LoadCheckOut", Color.red, 1f, 64f);
+                //if (this.mrLoadTimer > 30.0)
+                //    FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 2L, this.mnZ, 1f, "LoadTimer", Color.red, 1f, 64f);
+                //if (this.mnUsedStorage == this.mnMaxStorage)
+                //    FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 2L, this.mnZ, 1f, "MaxStorage", Color.red, 1f, 64f);
                 this.LeaveStation();
             }
             else
@@ -323,7 +407,7 @@ class FreightCartMob : MobEntity
                 //if (this.CurrentNetworkStock == null)
                 //    this.CurrentNetworkStock = FreightCartManager.instance.GetNetworkStock(this.FCStation);
                 this.FCStation.mrCartOnUs = 1f;
-                this.FCStation.mrLastCartLeavTimer = this.mrLoadTimer;
+                //this.FCStation.mrLastCartLeavTimer = this.mrLoadTimer;
                 if (this.FCStation.ConnectedInventory != null && this.StationOfferings == null)
                 {
                     this.StationOfferings = FreightCartManager.instance.GetStationOfferings(this.FCStation);
@@ -352,20 +436,29 @@ class FreightCartMob : MobEntity
                             }
                             else
                             {
-                                Debug.LogWarning("Freight cart withdrawal failed? ");
+                                Debug.LogWarning("Freight cart withdrawal failed? Trying to collect item: " + remainder.ToString() + " with cart inventory of: " + this.mnUsedStorage.ToString() + " and inventory count: " + this.LocalInventory[FCStation.NetworkID].ItemCount());
+                                if (this.mnUsedStorage < this.LocalInventory[FCStation.NetworkID].ItemCount())
+                                    this.RecountInventory();
                                 this.FCStation.DepositItem(remainder);
                             }
                         }
                         else
+                        {
                             this.LoadCheckOut = true;
+                            //FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 3L, this.mnZ, 1f, "null itemout", Color.red, 1f, 64f);
+                        }
                     }
                     else
+                    {
                         this.LoadCheckOut = true;
-
-
+                        //FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 3L, this.mnZ, 1f, "null next offer", Color.red, 1f, 64f);
+                    }
                 }
                 else
+                {
                     this.LoadCheckOut = true;
+                    //FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 3L, this.mnZ, 1f, "station has no offers list", Color.red, 1f, 64f);
+                }
 
                 //if (this.StoreItem(this.FCStation.mProferredItem))
                 //{
@@ -381,6 +474,18 @@ class FreightCartMob : MobEntity
         }
     }
 
+    private void RecountInventory()
+    {
+        if (this.LocalInventory == null || this.LocalInventory.Count == 0)
+            return;
+        var keys = this.LocalInventory.Keys.ToList();
+        int itemcount = 0;
+        for (int n = 0; n < keys.Count; n++)
+            itemcount += this.LocalInventory[keys[n]].ItemCount();
+        this.mnUsedStorage = itemcount;
+        Debug.LogWarning("Used Storage had to be updated for missing item count!");
+    }
+
     private ItemBase GetNextOffer()
     {
         if (!WorldScript.mbIsServer)
@@ -390,7 +495,7 @@ class FreightCartMob : MobEntity
         ItemBase item = this.StationOfferings[getitem].Key;
         if (FreightCartManager.instance.NetworkNeeds(this.NetworkID, item) > 0)
         {
-            return item.SetAmount(1);
+            return item.NewInstance().SetAmount(1);
         }
         else
         {
@@ -402,9 +507,10 @@ class FreightCartMob : MobEntity
                     check -= this.StationOfferings.Count;
                 item = this.StationOfferings[check].Key;
                 if (FreightCartManager.instance.NetworkNeeds(this.NetworkID, item) > 0)
-                    return item.SetAmount(1);
+                    return item.NewInstance().SetAmount(1);
             }
         }
+        this.FullEscape = true;
         return null;
     }
 
@@ -421,8 +527,6 @@ class FreightCartMob : MobEntity
             if (this.LocalInventory[this.NetworkID].IsEmpty())
                 this.LocalInventory.Remove(this.NetworkID);
         }
-        else
-            Debug.LogWarning("FreightCart tried to access inventory for missing network id?");
     }
 
     private string GetStorageString()
@@ -495,7 +599,7 @@ class FreightCartMob : MobEntity
             this.FCStation = (FreightCartStation)null;
         }
         if (this.mDotWithPlayerForwards > 0.5 && this.mDistanceToPlayer < 5.0 && (this.meLoadState == FreightCartMob.eLoadState.eLoading && this.mnUsedStorage > 0) && this.mrSpeed < 0.100000001490116)
-            FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Loaded " + this.GetStorageString(), Color.cyan, 1f, 64f);
+            FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Loaded " + this.mnUsedStorage.ToString() + "x Freight", Color.cyan, 1f, 64f);
         this.meLoadState = FreightCartMob.eLoadState.eTravelling;
         this.mrTargetSpeed = (float)this.rand.Next(95, 105) / 100f * this.mrSpeedScalar;
         this.mbNetworkUpdateRequested = true;
@@ -614,9 +718,10 @@ class FreightCartMob : MobEntity
                         this.mLook.Normalize();
                         if (this.mLook == vector3_1)
                             lValue1 = 0;
-                        else if (this.mnUsedStorage == this.mnMaxStorage)
+                        else if (this.mnUsedStorage == this.mnMaxStorage || this.FullEscape)
                         {
                             lValue1 = 0;
+                            this.FullEscape = false;
                         }
                         else
                         {
@@ -630,9 +735,10 @@ class FreightCartMob : MobEntity
                         this.mLook.Normalize();
                         if (this.mLook == vector3_1)
                             lValue1 = 0;
-                        else if (this.mnUsedStorage == 0)
+                        else if (this.mnUsedStorage == 0 || this.EmptyEscape)
                         {
                             lValue1 = 0;
+                            this.EmptyEscape = false;
                         }
                         else
                         {
@@ -740,11 +846,13 @@ class FreightCartMob : MobEntity
             }//Inserted my Freight Cart Station type!
             else if (type == FreightStationType)
             {
+                this.FullEscape = false;
                 Vector3 vector3 = SegmentCustomRenderer.GetRotationQuaternion(lFlags1) * Vector3.forward;
                 if (this.mLook == vector3 || this.mLook == -vector3)
                 {
                     if (lValue1 == FreightStationValue)
                     {
+                        this.EmptyEscape = false;
                         FreightCartStation Station = this.mUnderSegment.FetchEntity(eSegmentEntity.Mod, this.mnX, this.mnY - 1L, this.mnZ) as FreightCartStation;
                         if (Station == null)
                             this.LeaveStation();
@@ -764,11 +872,207 @@ class FreightCartMob : MobEntity
                 else
                     this.RemoveCart("MineCart hit sideways control piece! THIS IS UNFORGIVABLE!");
             }
+            else if (type == JunctionType)
+            {
+                ///////////////////////////////////////////////////////////////////////////////
+                //Add handling for when a cart arrives at a junction other than the anticipated one!
+
+                //Temp force to the old cross-over junction
+                bool dest = false;
+
+                if (this.meLoadState == FreightCartMob.eLoadState.eLoading || this.meLoadState == FreightCartMob.eLoadState.eUnloading || this.meLoadState == FreightCartMob.eLoadState.eCharging)
+                    this.LeaveStation();
+                this.meLoadState = FreightCartMob.eLoadState.eTravelling;
+                Vector3 vector3_1 = SegmentCustomRenderer.GetRotationQuaternion(lFlags1) * Vector3.forward;
+                vector3_1.Normalize();
+                vector3_1.x = vector3_1.x >= -0.5 ? (vector3_1.x <= 0.5 ? 0.0f : 1f) : -1f;
+                vector3_1.y = vector3_1.y >= -0.5 ? (vector3_1.y <= 0.5 ? 0.0f : 1f) : -1f;
+                vector3_1.z = vector3_1.z >= -0.5 ? (vector3_1.z <= 0.5 ? 0.0f : 1f) : -1f;
+                this.mLook.y = 0.0f;
+                this.mLook.Normalize();
+                
+                FreightTrackJunction junction = this.mUnderSegment.FetchEntity(eSegmentEntity.Mod, this.mnX, this.mnY - 1L, this.mnZ) as FreightTrackJunction;
+                if (junction == null)
+                    this.RemoveCart("Arrived at null track junction?");
+
+                if (this.DestinationJunction == null)
+                    this.ChooseDestination(junction);
+
+                if (this.DestinationJunction != null)
+                {
+                    //Debug.LogWarning("We have a destination junction with ID: " + this.DestinationJunction.JunctionID.ToString());
+                    if (this.DestinationJunction != junction)
+                    {
+                        //Debug.LogWarning("Freight Cart Destination junction != current junction");
+                        this.LastJunction = junction;
+                        if (this.JunctionRoute.Count != 0)
+                        {
+                            this.NextJunction = this.JunctionRoute.Pop();
+                            dest = this.GetLookFromDirection(junction.GetConnectedDirection(this.NextJunction));
+                        }
+                    }
+                    else if (junction == this.DestinationJunction)
+                    {
+                        //Debug.LogWarning("The current junction is the destination");
+                        dest = this.GetLookFromDirection(this.DestinationDirection);
+                        this.DestinationDirection = -1;
+                        this.DestinationJunction = null;
+                        this.LastJunction = junction;
+                        //Need to set expected junction for track network verification purposes on RemoveCart
+                    }
+                }
+                //Debug.LogWarning("Freight Cart after pathfinding dest bool is: " + dest.ToString());
+                //Vanilla code for a straight track -> filler for now (default if destination setting fails!)
+                if (vector3_1.y > 0.5 || vector3_1.y < -0.5)
+                    this.RemoveCart("Track Straight hitting non-straight piece!");
+                else if (!(this.mLook == vector3_1) && !(this.mLook == -vector3_1) && (Vector3.Dot(this.mLook, vector3_1) > 0.05f) && !dest)
+                    this.mLook = vector3_1;
+                else if (!(this.mLook == vector3_1) && !(this.mLook == -vector3_1) && (Vector3.Dot(this.mLook, vector3_1) < -0.05f) && !dest)
+                    this.mLook = -vector3_1;
+                else if (Vector3.Dot(this.mLook, vector3_1) < 0.05f && !dest)
+                {
+                    this.mLook.x = this.mLook.x >= -0.5 ? (this.mLook.x <= 0.5 ? 0f : 1f) : -1f;
+                    this.mLook.z = this.mLook.z >= -0.5 ? (this.mLook.z <= 0.5 ? 0f : 1f) : -1f;
+                }
+                //else
+                //{
+                //    Debug.LogWarning("Freight Cart skipped other processes to use decided look vector");
+                //}
+            }
+            else if (type == TourStationType)
+            {
+                //Facing opposite of station, cart has arrived otherwise cart continues with original look
+                if (Vector3.Dot(this.mLook, SegmentCustomRenderer.GetRotationQuaternion(lFlags1) * Vector3.forward) < -0.5 && this.meType == eMinecartType.FreightCartTour)
+                {
+                    TourCartStation Station = this.mUnderSegment.FetchEntity(eSegmentEntity.Mod, this.mnX, this.mnY - 1L, this.mnZ) as TourCartStation;
+                    bool insert = false;
+                    ItemBase itemBase = ItemManager.SpawnItem(111);
+                    if (Station != null && Station.hopper != null && Station.hopper.IsNotFull())
+                        insert = Station.hopper.TryInsert(Station, itemBase);
+                    if (WorldScript.mbIsServer && !insert)
+                    {
+                        DroppedItemData droppedItemData = ItemManager.instance.DropItem(itemBase, this.mnX, this.mnY, this.mnZ, Vector3.up);
+                        if (droppedItemData != null)
+                            droppedItemData.mrLifeRemaining = 36000f;
+                    }
+                    MobManager.instance.DestroyMob(this);
+                    WorldScript.instance.localPlayerInstance.mbRidingCart = false;
+                    WorldScript.instance.localPlayerInstance.mRideCart = null;
+                    WorldScript.instance.localPlayerInstance.mbGravity = true;
+                    this.mnUpdatesPerTick = 0;
+                }
+            }
             else if (type == 0)
                 Debug.LogWarning("Minecart hit edge of loaded area?");
             else
                 this.RemoveCart("Minecart hit " + TerrainData.GetNameForValue(type, lValue1) + "\nMinecart was on update " + this.mnCurrentUpdateTick + " of " + this.mnUpdatesPerTick + "\nSpeed was " + this.mrSpeed + " and offset was " + this.mBlockOffset + "\nSpeed per tick was " + this.mrSpeedPerTick + " and current look was " + this.mLook);
         }
+    }
+
+    private void ChooseDestination(FreightTrackJunction currentloc)
+    {
+        //Debug.LogWarning("Freight Cart ChoosingDestination");
+        if (this.mnUsedStorage > 0)
+        {
+            //Debug.LogWarning("Freight Cart based on filled inventory");
+            //Go to requesting station
+            List<string> keys = this.LocalInventory.Keys.ToList();
+            if (keys.Count == 0)
+            {
+                Debug.LogWarning("FreightCart tried to choose destination for filled cart but no inventory? Used storage: " + this.mnUsedStorage.ToString());
+                return;
+            }
+            string networkid = keys[0];
+            if (this.LocalInventory[networkid].Inventory.Count == 0)
+            {
+                Debug.LogWarning("FreightCart tried to choose destination while having empty inventory with used storage?");
+                return;
+            }
+            FreightCartStation station = null;
+            for (int n = 0; n < this.LocalInventory[networkid].Inventory.Count; n++)
+            {
+                station = FreightCartManager.instance.GetStation(networkid, this.LocalInventory[networkid].Inventory[n]);
+                if (station != null)
+                    break;
+            }
+            if (station == null)
+            {
+                if (this.mnUsedStorage != this.mnMaxStorage)
+                    station = FreightCartManager.instance.GetStation(networkid, null);
+                if (station == null)
+                {
+                    Debug.LogWarning("FreightCartManager returned null station for ChooseDestination of FreightCart");
+                    return;
+                }
+            }
+            this.DestinationJunction = station.ClosestJunction;
+            this.DestinationDirection = station.JunctionDirection;
+            this.JunctionRoute = currentloc.TrackNetwork.RouteFind(currentloc, this.DestinationJunction);
+        }
+        else
+        {
+            //Debug.LogWarning("Freight Cart based on empty cart");
+            if (this.AssignedStation == null || this.AssignedStation.AvailableCarts > this.AssignedStation.AssignedCarts)
+                this.TryAssignCart(currentloc.TrackNetwork);
+            if (this.AssignedStation != null)
+            {
+                //Debug.LogWarning("Freight Cart assigned station final selection, direction: " + this.AssignedStation.JunctionDirection.ToString());
+                //Debug.LogWarning("Available/Assigned station available carts: " + this.AssignedStation.AvailableCarts.ToString() + "/" + this.AssignedStation.AssignedCarts.ToString());
+                this.DestinationJunction = this.AssignedStation.ClosestJunction;
+                this.DestinationDirection = this.AssignedStation.JunctionDirection;
+                this.JunctionRoute = currentloc.TrackNetwork.RouteFind(currentloc, this.DestinationJunction);
+            }
+        }
+    }
+
+    private void TryAssignCart(FreightTrackNetwork network)
+    {
+        //Debug.LogWarning("Freight Cart Trying to assign cart");
+        for (int n = 0; n < network.TrackSegments.Count; n++)
+        {
+            FreightTrackSegment seg = network.TrackSegments[n];
+            //Debug.LogWarning("seg station count: " + seg.Stations.Count);
+            for (int m = 0; m < seg.Stations.Count; m++)
+            {
+                FreightCartStation station = seg.Stations[m];
+                if (station.AvailableCarts < station.AssignedCarts)
+                {
+                    //Debug.LogWarning("Freight Cart station for assignment found on direction " + station.JunctionDirection.ToString());
+                    if (this.AssignedStation != null)
+                        this.AssignedStation.AvailableCarts--;
+                    this.AssignedStation = station;
+                    this.AssignedStation.AvailableCarts++;
+                    return;
+                }
+            }
+        }
+        //No stations still requiring assigned carts... assign 'intelligently'
+        this.AssignedStation = FreightCartManager.instance.GetNeedyStation();
+        //Debug.LogWarning("Freight Cart had to revert to getting needy station");
+    }
+
+    /// <summary>
+    ///     Set the Freight Cart look for leaving a junction in the given direction
+    /// </summary>
+    /// <param name="direction"></param>
+    /// <returns></returns>
+    private bool GetLookFromDirection(int direction)
+    {
+        if (direction == 0)
+            this.mLook = Vector3.right;
+        else if (direction == 1)
+            this.mLook = Vector3.forward;
+        else if (direction == 2)
+            this.mLook = Vector3.left;
+        else if (direction == 3)
+            this.mLook = Vector3.back;
+        else
+        {
+            Debug.LogWarning("FreightCartMob attempted to set look by direction but failed with direction: " + direction.ToString());
+            return false;
+        }
+        //Debug.LogWarning("Look selected from direction with look: " + this.mLook.ToString() + " from direction: " + direction.ToString());
+        return true;
     }
 
     private void UpdateMove(float lrSpeed)
@@ -814,7 +1118,7 @@ class FreightCartMob : MobEntity
         }
         if (this.mLook.y == 0.0)
         {
-            float num = this.mBlockOffset.y;
+            //float num = this.mBlockOffset.y;
             this.mBlockOffset.y *= 0.9f;
         }
         float num1 = 1f;
@@ -861,8 +1165,6 @@ class FreightCartMob : MobEntity
 
     private void RemoveCart(string lReason)
     {
-        if (!WorldScript.mbIsServer)
-            return;
         Debug.Log((object)("****** LITTLE JIMMY DROP CARTS ******[" + lReason + "]"));
         if (this.mnUpdates <= 1)
             Debug.LogWarning((object)"Probable issue - minecart decided to drop on or before first update!");
@@ -879,12 +1181,16 @@ class FreightCartMob : MobEntity
             itemID = ItemEntries.MineCartT3;
         if (this.meType == FreightCartMob.eMinecartType.FreightCart_T4)
             itemID = ItemEntries.MineCartT4;
+        if (this.meType == FreightCartMob.eMinecartType.FreightCartTour)
+            itemID = ItemEntries.TourCart;
 
-        ItemBase itemBase = ItemManager.SpawnItem(itemID);
-        DroppedItemData droppedItemData = ItemManager.instance.DropItem(itemBase, this.mnX, this.mnY, this.mnZ, Vector3.up);
-        if (droppedItemData != null)
-            droppedItemData.mrLifeRemaining = 36000f;
-
+        if (WorldScript.mbIsServer)
+        {
+            ItemBase itemBase = ItemManager.SpawnItem(itemID);
+            DroppedItemData droppedItemData = ItemManager.instance.DropItem(itemBase, this.mnX, this.mnY, this.mnZ, Vector3.up);
+            if (droppedItemData != null)
+                droppedItemData.mrLifeRemaining = 36000f;
+        }
         //Unregister network stock
         List<string> keys = new List<string>();
         if (this.LocalInventory != null)
@@ -992,15 +1298,29 @@ class FreightCartMob : MobEntity
         this.mrTargetSpeed = (float)this.rand.Next(95, 105) / 100f * this.mrSpeedScalar;
 
         int count = reader.ReadInt32();
+        this.mnUsedStorage = 0;
         for (int index = 0; index < count; index++)
         {
             string networkid = reader.ReadString();
             MachineInventory inv = new MachineInventory(this, this.mnMaxStorage);
             inv.ReadInventory(reader);
-            this.LocalInventory.Add(networkid, inv);
+            if (!this.LocalInventory.ContainsKey(networkid))
+                this.LocalInventory.Add(networkid, inv);
+            else
+                this.LocalInventory[networkid] = inv;
             this.mnUsedStorage += inv.ItemCount();
+            int count2 = this.LocalInventory[networkid].Inventory.Count;
+            for (int n = 0; n < count2; n++)
+            {
+                ItemBase item = this.LocalInventory[networkid].Inventory[n];
+                bool checkreg = FreightCartManager.instance.NetworkAdd(networkid, item, item.GetAmount());
+                if (!checkreg)
+                {
+                    this.TransitCheckIn = false;
+                    break;
+                }
+            }
         }
-
         this.TransferInventory.ReadInventory(reader);
     }
 
@@ -1029,6 +1349,7 @@ class FreightCartMob : MobEntity
         FreightCart_T3,
         FreightCart_T4,
         FreightCartMK1,
+        FreightCartTour,
         //Basic,
         //Fast,
         //Large,
