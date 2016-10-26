@@ -11,7 +11,15 @@ public class SystemMonitorWindow : BaseMachineWindow
     private bool dirty;
     private bool DisplayAll = false;
     private bool SelNetwork = false;
+    private bool TrackNetworks = false;
+    private bool ViewInventory = false;
     private int SelectedNetwork = 0;
+    private int SelectedStorage = 0;
+    private int TrackNetworkDisplay = -1;
+    private int StationDisplay = -1;
+    private int CartDisplay = -1;
+    private int InventoryCount;
+    private FreightCartStation CurrentStation;
     private List<FreightRegistry> Registries;
     public static FreightCartManager fcm = FreightCartManager.instance;
     private Dictionary<ItemBase, int> FullInventory;
@@ -27,14 +35,13 @@ public class SystemMonitorWindow : BaseMachineWindow
         //Catch for when the window is called on an inappropriate machine
         if (monitor == null)
         {
-            GenericMachinePanelScript.instance.Hide();
+            //GenericMachinePanelScript.instance.Hide();
             UIManager.RemoveUIRules("Machine");
 
             return;
         }
-        UIUtil.UIdelay = 0;
-        UIUtil.UILock = true;
-        Debug.LogWarning("first area test fsm");
+
+        //Debug.LogWarning("first area test fsm");
         if (fcm == null)
             Debug.LogWarning("Freight cart manager instance is null!!");
         if (fcm != null && this.SelectedNetwork >= fcm.Networks.Count)
@@ -61,17 +68,28 @@ public class SystemMonitorWindow : BaseMachineWindow
 
             this.firstopen = true;
         }
-        if (!this.DisplayAll && !this.SelNetwork)
+        int globalxoffset = 75; //For window scaling adjustments
+        int buttonoffset = 95;
+        int buttonspacing = 140;
+        int buttonx1 = globalxoffset + buttonoffset - 25;
+        int buttonx2 = globalxoffset + buttonoffset + buttonspacing;
+        int buttonx3 = globalxoffset + buttonoffset + 2 * buttonspacing;
+        int buttonx4 = globalxoffset + buttonoffset + 3 * buttonspacing;
+        int buttonx5 = globalxoffset + buttonoffset + 4 * buttonspacing;
+        int buttonx6 = globalxoffset + buttonoffset + 5 * buttonspacing + 25;
+
+
+
+        if (!this.DisplayAll && !this.SelNetwork && !this.TrackNetworks && !this.ViewInventory)
         {
             this.manager.SetTitle("Freight System Status");
-            int globalxoffset = 75; //For window scaling adjustments
-            int buttonoffset = 175;
-            int buttonspacing = 175;
 
-            this.manager.AddButton("allnetworks", "Global Inventory", globalxoffset + buttonoffset, 0);
-            this.manager.AddButton("prevnetwork", "Previous Network", globalxoffset + buttonoffset + buttonspacing, 0);
-            this.manager.AddButton("nextnetwork", "Next Network", globalxoffset + buttonoffset + 2*buttonspacing, 0);
-            this.manager.AddButton("selnetwork", "Select Network", globalxoffset + buttonoffset + 3*buttonspacing, 0);
+            this.manager.AddButton("prevnetwork", "Previous Network", buttonx1, 0);
+            this.manager.AddButton("allnetworks", "Global Inventory", buttonx2, 0);
+            this.manager.AddButton("selnetwork", "Select Network", buttonx3, 0);
+            this.manager.AddButton("tracknetworks", "Track Systems", buttonx4, 0);
+            this.manager.AddButton("viewinventory", "View Inventory", buttonx5, 0);
+            this.manager.AddButton("nextnetwork", "Next Network", buttonx6, 0);
 
             int spacing = 60; //Spacing between each registry line
             int count = 0;
@@ -114,27 +132,186 @@ public class SystemMonitorWindow : BaseMachineWindow
         else if (this.SelNetwork)
         {
             this.manager.SetTitle("Select Network");
-            this.manager.AddButton("cancel", "Cancel", 500, 0);
+            this.manager.AddButton("allnetworks", "Global Inventory", buttonx2, 0);
+            this.manager.AddButton("selnetwork", "Network Status", buttonx3, 0);
+            this.manager.AddButton("tracknetworks", "Track Systems", buttonx4, 0);
+            this.manager.AddButton("viewinventory", "View Inventory", buttonx5, 0);
 
             int spacing = 50; //Spacing between each registry line
             int yoffset = 65; //Offset below button row
 
             for (int n = 0; n < fcm.Networks.Count; n++)
             {
-                this.manager.AddButton("networknum" + n, fcm.Networks[n], 500, yoffset + (n * spacing));
+                this.manager.AddButton("networknum" + n, fcm.Networks[n], buttonx3 + 70, yoffset + (n * spacing));
             }
         }
-        else //Display all
+        else if (this.TrackNetworks)
         {
-            int globalxoffset = 75; //For window scaling adjustments
-            int buttonoffset = 175;
-            int buttonspacing = 175;
+            this.manager.SetTitle("Track Systems");
+            this.manager.AddButton("allnetworks", "Global Inventory", buttonx2, 0);
+            this.manager.AddButton("selnetwork", "Select Network", buttonx3, 0);
+            this.manager.AddButton("tracknetworks", "Network Status", buttonx4, 0);
+            this.manager.AddButton("viewinventory", "View Inventory", buttonx5, 0);
 
-            this.manager.SetTitle("Freight System Status");
-            this.manager.AddButton("allnetworks", "Single Network", globalxoffset + buttonoffset, 0);
-            this.manager.AddButton("ordername", "Order By Name", globalxoffset + buttonoffset + buttonspacing, 0);
-            this.manager.AddButton("ordercount", "Order By Count", globalxoffset + buttonoffset + 2*buttonspacing, 0);
-            this.manager.AddButton("togglelayout", "Toggle Layout", globalxoffset + buttonoffset + 3*buttonspacing, 0);
+            int ycursor = 65;
+            int trackiconx = globalxoffset + 175;
+            int trackxoffset = trackiconx + 65;
+            int tracklabel = trackxoffset + 250;
+            int stationxicon = trackiconx + 50;
+            int stationlabel = stationxicon + 65;
+            int cartxicon = stationxicon + 50;
+            int cartlabel = cartxicon + 65;
+            int invxicon = cartxicon + 50;
+            int invlabel = invxicon + 65;
+
+            int networkcount = FreightCartManager.instance.GlobalTrackNetworks.Count;
+
+            if (networkcount == 0)
+                this.manager.AddBigLabel("notracknetworks", "No track networks found...", Color.red, 225, 250);
+            else
+            {
+                string trackicon = "Track Straight";
+                string stationicon = "Minecart Load";
+                for (int n = 0; n < networkcount; n++)
+                {
+                    FreightTrackNetwork network = FreightCartManager.instance.GlobalTrackNetworks[n];
+                    if (network == null)
+                        continue;
+                    int junctioncount = network.TrackJunctions.Count;
+                    int networkID = network.NetworkID;
+                    int assignedcarts;
+                    int availcarts;
+                    network.GetNetworkStats(out assignedcarts, out availcarts);
+
+                    this.manager.AddIcon("trackicon" + n, trackicon, Color.white, trackiconx, ycursor);
+                    this.manager.AddBigLabel("trackjunctions" + n, "ID: " + network.NetworkID.ToString() + "   " + junctioncount.ToString() + " Junctions   Carts: ", Color.white, trackxoffset, ycursor);
+                    this.manager.AddBigLabel("trackcarts" + n, availcarts.ToString() + " / " + assignedcarts.ToString(), availcarts > assignedcarts ? Color.green : availcarts == assignedcarts ? Color.white : Color.red, tracklabel, ycursor);
+                    ycursor += 60;
+                    if (this.TrackNetworkDisplay == n)
+                    {
+                        List<FreightCartStation> stations = network.GetNetworkStations();
+                        int stationcount = stations.Count;
+                        Debug.LogWarning("FSM Station Count: " + stationcount.ToString());
+                        for (int m = 0; m < stationcount; m++)
+                        {
+                            FreightCartStation station = stations[m];
+                            int stationavail = station.AvailableCarts;
+                            int stationassigned = station.AssignedCarts;
+                            this.manager.AddIcon("stationicon" + m, stationicon, Color.white, stationxicon, ycursor);
+                            this.manager.AddBigLabel("stationnetwork" + m, (!string.IsNullOrEmpty(station.StationName) ? station.StationName : "UNNAMED") + " - " + station.NetworkID, Color.white, stationlabel, ycursor);
+                            this.manager.AddBigLabel("stationcarts" + m, "Carts: " + stationavail.ToString() + " / " + stationassigned.ToString(), stationavail > stationassigned ? Color.green : stationavail == stationassigned ? Color.white : Color.red, stationlabel + 350, ycursor);
+                            ycursor += 60;
+                            if (this.StationDisplay == m)
+                            {
+                                this.manager.AddButton("addcart", "Add Cart", stationlabel + 475, ycursor - 60);
+                                this.manager.AddButton("removecart", "Remove Cart", stationlabel + 475, ycursor - 10);
+                                this.CurrentStation = station;
+
+                                List<FreightRegistry> LocalDeficits = FreightCartManager.instance.GetLocalDeficit(station.NetworkID, station.massStorageCrate);
+                                List<FreightRegistry> LocalSurplus = FreightCartManager.instance.GetLocalSurplus(station.NetworkID, station.massStorageCrate);
+                                ycursor -= 20;
+                                string str = "";
+                                int shifter = 1;
+                                int ind2 = 0;
+                                if (LocalDeficits.Count <= 0)
+                                    this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef", "This storage is fully stocked!", Color.white, false, stationlabel, ycursor);
+                                else
+                                    this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef", "Top requests for this storage:", Color.white, false, stationlabel, ycursor);
+                                ycursor += 20;
+                                for (int index = 0; index < LocalDeficits.Count; index++)
+                                {
+                                    if (LocalDeficits[index].Deficit != 0)
+                                    {
+                                        str = (index + 1).ToString() + ") " + LocalDeficits[index].Deficit.ToString("N0") + "x " + ItemManager.GetItemName(LocalDeficits[index].FreightItem) + "\n";
+                                        this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef" + index, str, Color.white, false, stationlabel, ycursor);
+                                        ycursor += 20;
+                                    }
+                                    shifter++;
+                                }
+                                ycursor -= 20 * shifter;
+                                if (LocalSurplus.Count <= 0)
+                                    this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur", "This storage has nothing to offer!", Color.white, false, stationlabel + 250, ycursor);
+                                else
+                                    this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur", "Top offerings for this storage:", Color.white, false, stationlabel + 250, ycursor);
+                                ycursor += 20;
+                                for (int index = 0; index < LocalSurplus.Count; index++)
+                                {
+                                    if (LocalSurplus[index].Surplus != 0)
+                                    {
+                                        str = (index + 1).ToString() + ") " + LocalSurplus[index].Surplus.ToString("N0") + "x " + ItemManager.GetItemName(LocalSurplus[index].FreightItem) + "\n";
+                                        this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur" + index, str, Color.white, false, stationlabel + 250, ycursor);
+                                        ycursor += 20;
+                                    }
+                                    ind2 = index;
+                                }
+                                if (ind2 > (shifter - 2))
+                                    ycursor += 20;
+                                else
+                                    ycursor += (shifter - 1 - ind2) * 20 + 20;
+
+                                int cartcount = station.CartList.Count;
+                                for (int p = 0; p < cartcount; p++)
+                                {
+                                    FreightCartMob cart = station.CartList[p];
+
+                                    int itemID = ItemEntries.MineCartT1;
+                                    if (cart.meType == FreightCartMob.eMinecartType.FreightCartMK1)
+                                        itemID = ModManager.mModMappings.ItemsByKey["steveman0.FreightCartMK1"].ItemId;
+                                    else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T1)
+                                        itemID = ItemEntries.MineCartT1;
+                                    else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T2)
+                                        itemID = ItemEntries.MineCartT2;
+                                    else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T3)
+                                        itemID = ItemEntries.MineCartT3;
+                                    else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T4)
+                                        itemID = ItemEntries.MineCartT4;
+                                    else if (cart.meType == FreightCartMob.eMinecartType.FreightCartTour)
+                                        itemID = ItemEntries.TourCart;
+                                    string carticon = ItemManager.GetItemIcon(itemID);
+
+                                    this.manager.AddIcon("carticon" + p, carticon, Color.white, cartxicon, ycursor);
+                                    this.manager.AddBigLabel("cartlabel" + p, "Inventory: " + cart.mnUsedStorage.ToString() + "/" + cart.mnMaxStorage.ToString(), Color.white, cartlabel, ycursor);
+                                    ycursor += 60;
+                                    if (p == CartDisplay)
+                                    {
+                                        MachineInventory inv = null;
+                                        if (!string.IsNullOrEmpty(station.NetworkID) && cart.LocalInventory.ContainsKey(station.NetworkID))
+                                            inv = cart.LocalInventory[station.NetworkID];
+                                        if (inv == null || inv.ItemCount() == 0)
+                                        {
+                                            this.manager.AddBigLabel("invlabelempty", "No goods from this station", Color.white, invxicon + 15, ycursor);
+                                            ycursor += 60;
+                                        }
+                                        else
+                                        {
+                                            int invcount = inv.Inventory.Count;
+                                            for (int q = 0; q < invcount; q++)
+                                            {
+                                                ItemBase item = inv.Inventory[q];
+                                                string invicon = ItemManager.GetItemIcon(item);
+                                                this.manager.AddIcon("invicon" + q, invicon, Color.white, invxicon, ycursor);
+                                                this.manager.AddBigLabel("invlabel" + q, item.ToString(), Color.white, invlabel, ycursor);
+                                                ycursor += 60;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        //Insert Tour cart staion listing here
+                    }
+                }
+            }
+        }
+        else if (this.DisplayAll) //Display Global Inventory
+        {
+            this.manager.SetTitle("Global Inventory");
+            this.manager.AddButton("allnetworks", "Network Status", buttonx2, 0);
+            this.manager.AddButton("selnetwork", "Select Network", buttonx3, 0);
+            this.manager.AddButton("tracknetworks", "Track Systems", buttonx4, 0);
+            this.manager.AddButton("viewinventory", "View Inventory", buttonx5, 0);
+
+            //Need to restore the buttons for different layout and ordering here!
 
             fcm.CalculateGlobalInventory();
             int count = fcm.GlobalInventory.Count;
@@ -172,8 +349,38 @@ public class SystemMonitorWindow : BaseMachineWindow
                 }
             }
         }
+        else if (this.ViewInventory)
+        {
+            this.manager.SetTitle("Mass Storage Inventory");
 
+            this.manager.AddButton("prevstorage", "Previous Inventory", buttonx1, 0);
+            this.manager.AddButton("allnetworks", "Global Inventory", buttonx2, 0);
+            this.manager.AddButton("selnetwork", "Select Network", buttonx3, 0);
+            this.manager.AddButton("tracknetworks", "Track Systems", buttonx4, 0);
+            this.manager.AddButton("viewinventory", "Network Status", buttonx5, 0);
+            this.manager.AddButton("nextstorage", "Next Inventory", buttonx6, 0);
 
+            if (fcm.StationInventories != null && fcm.StationInventories.Count > this.SelectedStorage)
+            {
+
+                this.InventoryCount = fcm.StationInventories[this.SelectedStorage].Inventory.Count;
+
+                int ItemRowSpacing = 60;
+                int ItemColSpacing = 60;
+                int yoffset = 100;
+
+                this.manager.AddBigLabel("nameofnetworktitle", "Viewing inventory of mass storage: ", Color.cyan, 335, 50);
+                this.manager.AddBigLabel("nameofnetwork", fcm.StationInventories[this.SelectedStorage].Name, Color.cyan, 650, 50);
+
+                for (int n = 0; n < this.InventoryCount; n++)
+                {
+                    int row = n / 15;
+                    int col = n % 15;
+                    this.manager.AddIcon("itemicon" + n, "empty", Color.white, globalxoffset + col * ItemColSpacing + 35, row * ItemRowSpacing + yoffset);
+                    this.manager.AddLabel(GenericMachineManager.LabelType.OneLineHalfWidth, "StackSize" + n, "", Color.white, false, globalxoffset + col * ItemColSpacing + 27 + 25, row * ItemRowSpacing + 22 + yoffset);
+                }
+            }
+        }
         this.dirty = true;
     }
 
@@ -187,9 +394,10 @@ public class SystemMonitorWindow : BaseMachineWindow
             UIManager.RemoveUIRules("Machine");
             return;
         }
-        UIUtil.UIdelay = 0;
 
-        if (!this.DisplayAll && !this.SelNetwork)
+        GenericMachinePanelScript.instance.Scroll_Bar.GetComponent<UIScrollBar>().scrollValue -= Input.GetAxis("Mouse ScrollWheel");
+
+        if (!this.DisplayAll && !this.SelNetwork && !this.TrackNetworks && !this.ViewInventory)
         {
             if (fcm.Networks != null && fcm.Networks.Count >= this.SelectedNetwork)
             {
@@ -241,6 +449,33 @@ public class SystemMonitorWindow : BaseMachineWindow
                     this.manager.UpdateLabel("iteminfo" + n, iteminfo, Color.white);
             }
         }
+        else if (this.ViewInventory)
+        {
+            if (fcm.StationInventories != null && fcm.StationInventories.Count > this.SelectedStorage)
+            {
+                int count = fcm.StationInventories[this.SelectedStorage].Inventory.Count;
+                if (count != this.InventoryCount)
+                    this.manager.RedrawWindow();
+
+                for (int n = 0; n < this.InventoryCount; n++)
+                {
+                    ItemBase item = fcm.StationInventories[this.SelectedStorage].Inventory[n].Key;
+                    string iconname = ItemManager.GetItemIcon(item);
+                    string itemname = ItemManager.GetItemName(item);
+                    int itemcount = fcm.StationInventories[this.SelectedStorage].Inventory[n].Value;
+                    string iteminfo = (itemcount.ToString("N0") + "x " + itemname);
+                    iteminfo = iteminfo.Substring(0, 35 > iteminfo.Length ? iteminfo.Length : 35);
+
+                    this.manager.UpdateIcon("itemicon" + n, iconname, Color.white);
+                    if (this.CompactLayout)
+                        this.manager.UpdateLabel("StackSize" + n, FormatStackText(itemcount), Color.white);
+                    else
+                        this.manager.UpdateLabel("iteminfo" + n, iteminfo, Color.white);
+                }
+            }
+            else
+                this.manager.RedrawWindow();
+        }
     }
 
     private string FormatStackText(int count)
@@ -276,7 +511,7 @@ public class SystemMonitorWindow : BaseMachineWindow
     public override bool ButtonClicked(string name, SegmentEntity targetEntity)
     {
 
-        if (name.Contains("nextnetwork")) // Increment network count
+        if (name == "nextnetwork") // Increment network count
         {
             this.SelectedNetwork++;
             if (this.SelectedNetwork >= fcm.Networks.Count)
@@ -284,7 +519,7 @@ public class SystemMonitorWindow : BaseMachineWindow
             this.manager.RedrawWindow();
             return true;
         }
-        if (name.Contains("prevnetwork")) // Decrement network count
+        else if (name == "prevnetwork") // Decrement network count
         {
             this.SelectedNetwork--;
             if (this.SelectedNetwork < 0)
@@ -292,25 +527,59 @@ public class SystemMonitorWindow : BaseMachineWindow
             this.manager.RedrawWindow();
             return true;
         }
-        if (name.Contains("allnetworks"))
+        else if (name == "nextstorage") // Increment storage count
+        {
+            this.SelectedStorage++;
+            if (this.SelectedStorage >= fcm.StationInventories.Count)
+                this.SelectedStorage = 0;
+            this.manager.RedrawWindow();
+            return true;
+        }
+        else if (name == "prevstorage") // Decrement storage count
+        {
+            this.SelectedStorage--;
+            if (this.SelectedStorage < 0)
+                this.SelectedStorage = fcm.StationInventories.Count - 1;
+            this.manager.RedrawWindow();
+            return true;
+        }
+        else if (name == "allnetworks")
         {
             this.DisplayAll = !this.DisplayAll;
-            this.manager.RedrawWindow();
-            return true;
-        }
-        if (name.Contains("selnetwork"))
-        {
-            this.SelNetwork = true;
-            this.manager.RedrawWindow();
-            return true;
-        }
-        if (name.Contains("cancel"))
-        {
             this.SelNetwork = false;
+            this.TrackNetworks = false;
+            this.ViewInventory = false;
             this.manager.RedrawWindow();
             return true;
         }
-        if (name.Contains("networknum")) // drag drop to a slot
+        else if (name == "tracknetworks")
+        {
+            this.TrackNetworks = !this.TrackNetworks;
+            this.SelNetwork = false;
+            this.DisplayAll = false;
+            this.ViewInventory = false;
+            this.manager.RedrawWindow();
+            return true;
+        }
+        else if (name == "selnetwork")
+        {
+            this.SelNetwork = !this.SelNetwork;
+            this.DisplayAll = false;
+            this.TrackNetworks = false;
+            this.ViewInventory = false;
+            this.manager.RedrawWindow();
+            return true;
+        }
+        else if (name == "viewinventory")
+        {
+            this.ViewInventory = !this.ViewInventory;
+            this.SelNetwork = false;
+            this.DisplayAll = false;
+            this.TrackNetworks = false;
+            this.manager.RedrawWindow();
+            return true;
+        }
+        else if (name.Contains("networknum"))
         {
             int slotNum = -1;
             int.TryParse(name.Replace("networknum", ""), out slotNum); //Get slot name as number
@@ -323,17 +592,84 @@ public class SystemMonitorWindow : BaseMachineWindow
                 return true;
             }
         }
-        if (name.Contains("ordername"))
+        else if (name.Contains("trackicon"))
+        {
+            int slotNum = -1;
+            int.TryParse(name.Replace("trackicon", ""), out slotNum); //Get slot name as number
+
+            if (slotNum > -1) // valid slot
+            {
+                if (this.TrackNetworkDisplay == slotNum)
+                    this.TrackNetworkDisplay = -1;
+                else
+                    this.TrackNetworkDisplay = slotNum;
+                this.StationDisplay = -1;
+                this.CartDisplay = -1;
+                this.manager.RedrawWindow();
+                return true;
+            }
+        }
+        else if (name.Contains("stationicon"))
+        {
+            int slotNum = -1;
+            int.TryParse(name.Replace("stationicon", ""), out slotNum); //Get slot name as number
+
+            if (slotNum > -1) // valid slot
+            {
+                if (this.StationDisplay == slotNum)
+                    this.StationDisplay = -1;
+                else
+                    this.StationDisplay = slotNum;
+                this.CartDisplay = -1;
+                this.manager.ClearWindow();
+                this.manager.RedrawWindow();
+                return true;
+            }
+        }
+        else if (name.Contains("carticon"))
+        {
+            int slotNum = -1;
+            int.TryParse(name.Replace("carticon", ""), out slotNum); //Get slot name as number
+
+            if (slotNum > -1) // valid slot
+            {
+                if (this.CartDisplay == slotNum)
+                    this.CartDisplay = -1;
+                else
+                    this.CartDisplay = slotNum;
+                this.manager.RedrawWindow();
+                return true;
+            }
+        }
+        else if (name == "addcart")
+        {
+            int amount = 1;
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                amount = 10;
+            FreightCartWindow.SetCartAssignment(this.CurrentStation, this.CurrentStation.AssignedCarts + amount);
+            this.manager.UpdateLabel("stationcarts" + this.StationDisplay.ToString(), "Carts: " + this.CurrentStation.AvailableCarts.ToString() + " / " + this.CurrentStation.AssignedCarts.ToString(), this.CurrentStation.AvailableCarts > this.CurrentStation.AssignedCarts ? Color.green : this.CurrentStation.AvailableCarts == this.CurrentStation.AssignedCarts ? Color.white : Color.red);
+            return true;
+        }
+        else if (name == "removecart")
+        {
+            int amount = 1;
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                amount = 10;
+            FreightCartWindow.SetCartAssignment(this.CurrentStation, this.CurrentStation.AssignedCarts - amount < 0 ? 0 : this.CurrentStation.AssignedCarts - amount);
+            this.manager.UpdateLabel("stationcarts" + this.StationDisplay.ToString(), "Carts: " + this.CurrentStation.AvailableCarts.ToString() + " / " + this.CurrentStation.AssignedCarts.ToString(), this.CurrentStation.AvailableCarts > this.CurrentStation.AssignedCarts ? Color.green : this.CurrentStation.AvailableCarts == this.CurrentStation.AssignedCarts ? Color.white : Color.red);
+            return true;
+        }
+        else if (name == "ordername")
         {
             this.OrderByName = true;
             this.manager.RedrawWindow();
         }
-        if (name.Contains("ordercount"))
+        else if (name == "ordercount")
         {
             this.OrderByName = false;
             this.manager.RedrawWindow();
         }
-        if (name.Contains("togglelayout"))
+        else if (name == "togglelayout")
         {
             this.CompactLayout = !this.CompactLayout;
             this.manager.RedrawWindow();
@@ -396,6 +732,10 @@ public class SystemMonitorWindow : BaseMachineWindow
         GenericMachinePanelScript.instance.Source_Holder.transform.localScale = new Vector3(1.0f, 1.0f, 1.0f);
         GenericMachinePanelScript.instance.Generic_Machine_Title_Label.transform.localScale = new Vector3(1.0f, 1.0f, 1.0f);
         this.firstopen = false;
+
+        this.TrackNetworkDisplay = -1;
+        this.StationDisplay = -1;
+        this.CartDisplay = -1;
 
         base.OnClose(targetEntity);
     }

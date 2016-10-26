@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using System.Reflection;
+using System;
 using System.Linq;
 using UnityEngine;
 using FortressCraft.Community.Utilities;
@@ -7,6 +7,8 @@ using System.Threading;
 
 public class FreightCartManager
 {
+    //The major lists need to be queued for entry so that various updates don't clash by threading
+    //Add a queue for adding/removing registries which can be performed by UpdateMassInventories so that it can't clash
     public static FreightCartManager instance = null;
     public List<FreightRegistry> MasterRegistry;
     public List<FreightRegistry> CopiedFreight;
@@ -16,6 +18,7 @@ public class FreightCartManager
     public List<MassInventory> NetworkStock;
     public List<MassInventory> NetworkDeficit;
     public List<KeyValuePair<ItemBase, int>> GlobalInventory;
+    public List<FreightTrackNetwork> GlobalTrackNetworks = new List<FreightTrackNetwork>();
     public List<string> Networks;
 
     public FreightCartManager()
@@ -73,6 +76,18 @@ public class FreightCartManager
         Debug.Log("Total network count: " + this.Networks.Count);
         foreach (string x in this.Networks)
             Debug.Log("Network entry with ID: " + x);
+    }
+
+    public void DebugTrackNetworks()
+    {
+        Debug.Log("---------------Track Network Debug-------------------");
+        int count = this.GlobalTrackNetworks.Count;
+        for (int n = 0; n < count; n++)
+        {
+            FreightTrackNetwork x = this.GlobalTrackNetworks[n];
+            Debug.Log("Network Entry with ID: " + x.NetworkID.ToString() + " and junction count: " + x.TrackJunctions.Count.ToString());
+        }
+        Debug.Log("--------------------End Debug----------------------------");
     }
 
     public void AddNetwork(string networkid)
@@ -349,6 +364,10 @@ public class FreightCartManager
         /// <returns>List of items and their quantities available</returns>
     public List<KeyValuePair<ItemBase, int>> GetStationOfferings(FreightCartStation station)
     {
+        if (station == null || station.ConnectedInventory == null)
+            return new List<KeyValuePair<ItemBase, int>>();
+        if (station.OfferAll)
+            return station.ConnectedInventory.Inventory;
         List<FreightRegistry> registries = this.GetFreightEntries(station.NetworkID, station.ConnectedInventory.MassStorage);
         List<KeyValuePair<ItemBase, int>> available = new List<KeyValuePair<ItemBase, int>>();
 
@@ -385,7 +404,7 @@ public class FreightCartManager
     public FreightCartStation GetNeedyStation()
     {
         string networkid = this.GetNeedyNetwork();
-        return this.GetStation(networkid, null);
+        return this.GetStation(networkid, null, false);
     }
 
     /// <summary>
@@ -394,12 +413,16 @@ public class FreightCartManager
     /// <param name="networkid">On this network</param>
     /// <param name="item">This item type for delivery - search for any offer if item is null</param>
     /// <returns>The station</returns>
-    public FreightCartStation GetStation(string networkid, ItemBase item)
+    public FreightCartStation GetStation(string networkid, ItemBase item, bool offloadingexcess)
     {
         //OMG please come up with something better!!
 
         //Get all item registries for this network on all storages
-        List<FreightRegistry> reg = this.MasterRegistry.Where(x => x.NetworkID == networkid && x.MassStorage != null).ToList();
+        List<FreightRegistry> reg = new List<FreightRegistry>();
+        if (item == null)
+            reg = this.MasterRegistry.Where(x => x.NetworkID == networkid && x.MassStorage != null).ToList();
+        else
+            reg = this.MasterRegistry.Where(x => x.NetworkID == networkid && x.MassStorage != null && x.FreightItem.Compare(item)).ToList();
         int count = reg.Count;
         for (int n = 0; n < count; n++)
         {
@@ -439,21 +462,26 @@ public class FreightCartManager
                             }
                             else
                             {
-                                List<KeyValuePair<ItemBase, int>> needs = this.GetStationNeeds(station);
-                                int count4 = needs.Count;
-                                //Debug.LogWarning("Station needs count: " + count4);
-                                List<FreightRegistry> regdeb = this.GetLocalDeficit(networkid, crate);
-                                if (regdeb.Count > 0)
+                                if (!offloadingexcess)
                                 {
-                                    FreightRegistry regdebug = this.GetLocalDeficit(networkid, crate)[0];
-                                    //Debug.LogWarning("Station first local deficit: " + regdebug.Deficit.ToString() + " " + regdebug.FreightItem.ToString());
+                                    List<KeyValuePair<ItemBase, int>> needs = this.GetStationNeeds(station);
+                                    int count4 = needs.Count;
+                                    //Debug.LogWarning("Station needs count: " + count4);
+                                    List<FreightRegistry> regdeb = this.GetLocalDeficit(networkid, crate);
+                                    //if (regdeb.Count > 0)
+                                    //{
+                                    //    FreightRegistry regdebug = this.GetLocalDeficit(networkid, crate)[0];
+                                    //    //Debug.LogWarning("Station first local deficit: " + regdebug.Deficit.ToString() + " " + regdebug.FreightItem.ToString());
+                                    //}
+                                    for (int q = 0; q < count4; q++)
+                                    {
+                                        //Debug.LogWarning("Station needs in FCM GetStation: " + needs[q].Key.ToString());
+                                        if (needs[q].Key.Compare(item))
+                                            return station;
+                                    }
                                 }
-                                for (int q = 0; q < count4; q++)
-                                {
-                                    //Debug.LogWarning("Station needs in FCM GetStation: " + needs[q].Key.ToString());
-                                    if (needs[q].Key.Compare(item))
-                                        return station;
-                                }
+                                else
+                                    return station;
                             }
                         }
                     }
@@ -515,30 +543,38 @@ public class FreightCartManager
                 MassStorageCrate crate = this.StationInventories[index].MassStorage;
                 List <KeyValuePair<ItemBase, int>> items = this.StationInventories[index].Inventory;
 
-                //this.DebugFreight();
-                //1. Get all freight entries for the crate
-                this.MasterRegistry.Where(x => x.MassStorage == crate).ToList()
-                        //2. Copy the inventory storage over to the freight registry
-                        .ForEach(x => x.Inventory = items.FirstOrDefault(y => y.Key.Compare(x.FreightItem)).Value);
-                //3. Calculate the new deficits and surpluses from the lowstock and highstock and inventory and store it
-                this.MasterRegistry.Where(x => x.MassStorage == crate).ToList().ForEach(x => x.RecalculateParams());
-
-                //4. Calculate the network deficit by performing a sum over all inventories by network ID
-                //Second line is to select only the entries with networks associated with the crate - no need to update non-updating networks
-                //Third line is to group by freight item so that we sum up deficits per item entry
-                var groups = this.MasterRegistry.Where(x => x.MassStorage == null
-                        && this.MasterRegistry.Where(y => y.MassStorage == crate).Select(z => z.NetworkID == x.NetworkID).Any(a => a.Equals(true)))
-                        .GroupBy(z => z.FreightItem, new ItemBaseComparer());
-
-                foreach (var group in groups)
+                try
                 {
-                    ItemBase item = group.Key;
-                    foreach (FreightRegistry x in group)
+                    //this.DebugFreight();
+                    //1. Get all freight entries for the crate
+                    this.MasterRegistry.Where(x => x.MassStorage == crate).ToList()
+                            //2. Copy the inventory storage over to the freight registry
+                            .ForEach(x => x.Inventory = items.FirstOrDefault(y => y.Key.Compare(x.FreightItem)).Value);
+                    //3. Calculate the new deficits and surpluses from the lowstock and highstock and inventory and store it
+                    this.MasterRegistry.Where(x => x.MassStorage == crate).ToList().ForEach(x => x.RecalculateParams());
+
+                    //4. Calculate the network deficit by performing a sum over all inventories by network ID
+                    //Second line is to select only the entries with networks associated with the crate - no need to update non-updating networks
+                    //Third line is to group by freight item so that we sum up deficits per item entry
+                    var groups = this.MasterRegistry.Where(x => x.MassStorage == null
+                            && this.MasterRegistry.Where(y => y.MassStorage == crate).Select(z => z.NetworkID == x.NetworkID).Any(a => a.Equals(true)))
+                            .GroupBy(z => z.FreightItem, new ItemBaseComparer());
+
+                    foreach (var group in groups)
                     {
-                        x.Deficit = this.MasterRegistry.Where(y => y.NetworkID == x.NetworkID && y.FreightItem.Compare(item) && y.MassStorage != null).Sum(z => z.Deficit);
-                        x.Surplus = this.MasterRegistry.Where(y => y.NetworkID == x.NetworkID && y.FreightItem.Compare(item) && y.MassStorage != null).Sum(z => z.Surplus);
-                        x.Inventory = this.MasterRegistry.Where(y => y.NetworkID == x.NetworkID && y.FreightItem.Compare(item) && y.MassStorage != null).Sum(z => z.Inventory);
+                        ItemBase item = group.Key;
+                        foreach (FreightRegistry x in group)
+                        {
+                            x.Deficit = this.MasterRegistry.Where(y => y.NetworkID == x.NetworkID && y.FreightItem.Compare(item) && y.MassStorage != null).Sum(z => z.Deficit);
+                            x.Surplus = this.MasterRegistry.Where(y => y.NetworkID == x.NetworkID && y.FreightItem.Compare(item) && y.MassStorage != null).Sum(z => z.Surplus);
+                            x.Inventory = this.MasterRegistry.Where(y => y.NetworkID == x.NetworkID && y.FreightItem.Compare(item) && y.MassStorage != null).Sum(z => z.Inventory);
+                        }
                     }
+                }
+                catch (InvalidOperationException)
+                {
+                    Debug.LogWarning("UpdateMassInventory caught an InvalidOperationException, probably due to threaded access of MasterRegistry.  Aborting!");
+                    break;
                 }
             }
         }
@@ -586,6 +622,7 @@ class ManagerSync : MonoBehaviour
     public int CartCounter = 0;
     public static ManagerSync instance = null;
     public static Queue<FreightCartMob> CartLoader = new Queue<FreightCartMob>();
+    public static FreightCartMob TourCart;
 
     void Start()
     {
@@ -614,6 +651,12 @@ class ManagerSync : MonoBehaviour
                 mob.mWrapper.mGameObjectList[0].gameObject.SetActive(true);
                 CartLoader.Dequeue();
                 this.CartCounter++;
+                if (TourCart != null && mob == TourCart)
+                {
+                    WorldScript.instance.localPlayerInstance.mRideable = TourCart.mWrapper.mGameObjectList[0].AddComponent<Rideable>();
+                    WorldScript.instance.localPlayerInstance.mbRidingCart = true;
+                    WorldScript.instance.localPlayerInstance.mbGravity = false;
+                }
             }
         }
     } 

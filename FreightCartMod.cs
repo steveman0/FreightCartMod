@@ -21,12 +21,16 @@ public class FreightCartMod : FortressCraftMod
         modRegistrationData.RegisterMobHandler("steveman0.FreightCart_T4");
         modRegistrationData.RegisterMobHandler("steveman0.FreightCartMK1");
         modRegistrationData.RegisterMobHandler("steveman0.FreightCart_Tour");
+        modRegistrationData.RegisterMobHandler("steveman0.FreightCart_TourBasic");
         modRegistrationData.RegisterEntityHandler("steveman0.FreightSystemMonitor");
         modRegistrationData.RegisterEntityHandler("steveman0.FreightCartFactory");
         modRegistrationData.RegisterEntityHandler("steveman0.TrackJunction");
         modRegistrationData.RegisterEntityHandler("steveman0.TourCartStation");
+        modRegistrationData.RegisterEntityUI("steveman0.FreightCartStation", new FreightCartWindow());
+        modRegistrationData.RegisterEntityUI("steveman0.FreightSystemMonitor", new SystemMonitorWindow());
 
-        UIManager.NetworkCommandFunctions.Add("FreightCartWindow", new UIManager.HandleNetworkCommand(FreightCartWindow.HandleNetworkCommand));
+        UIManager.NetworkCommandFunctions.Add("steveman0.FreightCartWindow", new UIManager.HandleNetworkCommand(FreightCartWindow.HandleNetworkCommand));
+        UIManager.NetworkCommandFunctions.Add("steveman0.TrackJunctionWindow", new UIManager.HandleNetworkCommand(TrackJunctionWindow.HandleNetworkCommand));
 
         //new FreightCartManager();
 
@@ -36,7 +40,7 @@ public class FreightCartMod : FortressCraftMod
         Sync.SetActive(true);
         Sync.GetComponent<ManagerSync>().enabled = true;
 
-        Debug.Log("Freight Cart Mod V5 registered");
+        Debug.Log("Freight Cart Mod V7 registered");
 
         return modRegistrationData;
     }
@@ -92,6 +96,8 @@ public class FreightCartMod : FortressCraftMod
             results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCart_T4, parameters);
         if (parameters.MobKey == "steveman0.FreightCart_Tour")
             results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCartTour, parameters);
+        if (parameters.MobKey == "steveman0.FreightCart_TourBasic")
+            results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCartTourBasic, parameters);
 
         if (parameters.MobKey == "steveman0.FreightCartMK1")
             results.Mob = new FreightCartMob(FreightCartMob.eMinecartType.FreightCartMK1, parameters);

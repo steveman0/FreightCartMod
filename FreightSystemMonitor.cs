@@ -8,8 +8,7 @@ public class FreightSystemMonitor : MachineEntity
 {
     private bool mbLinkedToGO = false;
     private GameObject HoloPreview;
-    private SystemMonitorWindow MonitorPanel = new SystemMonitorWindow();
-    private bool testlock = false;
+    //private SystemMonitorWindow MonitorPanel = new SystemMonitorWindow();
 
     public FreightSystemMonitor(ModCreateSegmentEntityParameters parameters)
         : base(parameters)
@@ -20,7 +19,7 @@ public class FreightSystemMonitor : MachineEntity
 
     public override string GetPopupText()
     {
-        UIUtil.HandleThisMachineWindow(this, MonitorPanel);
+        //UIUtil.HandleThisMachineWindow(this, MonitorPanel);
         //Hold down right alt and press left alt for debug printed to log
         if (Input.GetKeyDown(KeyCode.LeftAlt) && Input.GetKey(KeyCode.RightAlt))
         {
@@ -65,7 +64,7 @@ public class FreightSystemMonitor : MachineEntity
 
     public override void UnityUpdate()
     {
-        UIUtil.DisconnectUI(this);
+        //UIUtil.DisconnectUI(this);
         if (!this.mbLinkedToGO)
         {
             if (this.mWrapper == null || this.mWrapper.mGameObjectList == null)

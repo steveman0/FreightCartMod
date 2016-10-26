@@ -130,6 +130,11 @@ public class TourStationWindow : BaseMachineWindow
         }
         else if (name.Contains("tourstation")) // drag drop to a slot
         {
+            if (station.TrackNetwork == null || station.ClosestJunction == null)
+            {
+                Debug.LogWarning("TourStationWindow attemption to travel on null network or from null junction");
+                return false;
+            }
             int slotNum = -1;
             int.TryParse(name.Replace("tourstation", ""), out slotNum); //Get slot name as number
             List<string> keys = station.TrackNetwork.TourCartStations.Keys.ToList();

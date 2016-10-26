@@ -54,6 +54,7 @@ public class FreightTrackSegment
         newnetwork.ReassignTourCartStations(oldnetwork);
         oldnetwork.TrackJunctions.Clear();
         oldnetwork.TrackSegments.Clear();
+        FreightCartManager.instance.GlobalTrackNetworks.Remove(oldnetwork);
         oldnetwork = null;
     }
 }

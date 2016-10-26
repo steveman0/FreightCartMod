@@ -17,6 +17,7 @@ public class FreightTrackNetwork
         this.NetworkID = Networks;
         Networks++;
         this.TrackJunctions.Add(junction);
+        FreightCartManager.instance.GlobalTrackNetworks.Add(this);
     }
 
     public bool ContainsTrackSegment(FreightTrackSegment track)
@@ -29,8 +30,42 @@ public class FreightTrackNetwork
         return this.TrackJunctions.Contains(junction);
     }
 
+    public List<FreightCartStation> GetNetworkStations()
+    {
+        List<FreightCartStation> stations = new List<FreightCartStation>();
+        int count = this.TrackSegments.Count;
+        for (int n = 0; n < count; n++)
+        {
+            int stationcount = this.TrackSegments[n].Stations.Count;
+            for (int m = 0; m < stationcount; m++)
+            {
+                FreightCartStation station = this.TrackSegments[n].Stations[m];
+                if (!stations.Contains(station))
+                    stations.Add(station);
+            }
+        }
+        return stations;
+    }
+
+    public void GetNetworkStats(out int assignedcarts, out int availcarts)
+    {
+        List<FreightCartStation> stations = this.GetNetworkStations();
+        int count = stations.Count;
+        assignedcarts = 0;
+        availcarts = 0;
+        for (int n = 0; n < count; n++)
+        {
+            FreightCartStation station = stations[n];
+            assignedcarts += station.AssignedCarts;
+            availcarts += station.AvailableCarts;
+        }
+    }
+
     public void NetworkIntegrityCheck(List<FreightTrackJunction> junctions)
     {
+        if (junctions == null || junctions[0] == null)
+            return;
+        FreightTrackNetwork oldnetwork = junctions[0].TrackNetwork;
         int count = junctions.Count;
         if (count < 2)
             return;
@@ -51,6 +86,10 @@ public class FreightTrackNetwork
                 this.NetworkIntegrityCheck(junctions[0], junctions[1], junctions[2], junctions[3]);
                 break;
         }
+        FreightCartManager.instance.GlobalTrackNetworks.Remove(oldnetwork);
+        oldnetwork.TrackJunctions.Clear();
+        oldnetwork.TrackSegments.Clear();
+        oldnetwork = null;
     }
 
     /// <summary>
@@ -100,42 +139,6 @@ public class FreightTrackNetwork
             this.ReconstructNetwork(junctions4);
         }
         
-        ////First check if junction 3 is in nets of jun1 (and 2) then check if it's only in 2 otherwise build its net
-        //bool jun1and3 = false;
-        //bool jun2and3 = false;
-        //if (junction3 != null && junctions1.Contains(junction3))
-        //{
-        //    jun1and3 = true;
-        //    if (jun1and2)
-        //        jun2and3 = true;
-        //}
-        //else if (junction3 != null && !jun1and2 && junctions2.Contains(junction3))
-        //    jun2and3 = true;
-        //else
-        //    junctions3 = this.JunctionNetMap(junction3);
-
-        ////Now all the other networks are built or found to have been merged. Just need to determine if junction 4 is isolated
-        //bool jun1and4;
-        //bool jun2and4;
-        //bool jun3and4;
-        //if (junction4 != null && junctions1.Contains(junction4))
-        //{
-        //    jun1and4 = true;
-        //    if (jun1and2)
-        //        jun2and4 = true;
-        //    if (jun1and3)
-        //        jun3and4 = true;
-        //}
-        //else if (junction4 != null && junctions2.Contains(junction4))
-        //{
-        //    jun2and4 = true;
-        //    if (jun2and3)
-        //        jun3and4 = true;
-        //}
-        //else if (junction4 != null && junctions3.Contains(junction4))
-        //    jun3and4 = true;
-        //else
-        //    junctions4 = this.JunctionNetMap(junction4);
     }
 
     /// <summary>
@@ -195,12 +198,17 @@ public class FreightTrackNetwork
                     trackseg.TrackNetwork = network;
                 }
             }
+            junction.TrackNetwork.TrackJunctions.Remove(junction);
+            if (junction.TrackNetwork.TrackJunctions.Count == 0)
+                FreightCartManager.instance.GlobalTrackNetworks.Remove(junction.TrackNetwork);
             junction.TrackNetwork = network;
             if (!network.TrackJunctions.Contains(junction))
-            network.TrackJunctions.Add(junction);
+                network.TrackJunctions.Add(junction);
         }
         network.ResetJunctionIndices();
         network.ReassignTourCartStations(this);
+        if (!FreightCartManager.instance.GlobalTrackNetworks.Contains(network))
+            FreightCartManager.instance.GlobalTrackNetworks.Add(network);
     }
 
     /// <summary>
@@ -224,7 +232,11 @@ public class FreightTrackNetwork
         int count = keys.Count;
         for (int n = 0; n < count; n++)
         {
+            if (string.IsNullOrEmpty(keys[n]) || !original.TourCartStations.ContainsKey(keys[n]))
+                continue;
             TourCartStation station = original.TourCartStations[keys[n]];
+            if (station.ClosestJunction == null || station.TrackNetwork == null)
+                continue;
             if (station.ClosestJunction.TrackNetwork == this && station.TrackNetwork.TourCartStations.ContainsKey(keys[n]))
             {
                 station.TrackNetwork.TourCartStations.Remove(keys[n]);
@@ -267,6 +279,12 @@ public class FreightTrackNetwork
         //Initialize a separate array of distances for pulling the tentative distances, initialize the start to 0
         int[] distances = Enumerable.Repeat(int.MaxValue, junctioncount).ToArray();
         int currentnode = start.JunctionIndex;
+        if (currentnode >= distances.Length)
+        {
+            Debug.LogWarning("FreightTrackNetwork RouteFind trying to navigate from junction outside of range");
+            this.ResetJunctionIndices();
+            return new Stack<FreightTrackJunction>();
+        }
         distances[currentnode] = 0;
 
         //Initialize an array for storing the parent junction for the path finding to later trace back to the beginning, indexed to JunctionIndex
@@ -281,7 +299,7 @@ public class FreightTrackNetwork
         int tryroute;               //Distance to route to neighbor through active junction
         FreightTrackJunction freightnode = tentativedistances.Dequeue();
         FreightTrackJunction neighbor;
-
+        //Debug.LogWarning("FreightTrackNetwork RouteFind DEBUG - prior to loop");
         for (int m = 0; m < junctioncount; m++)
         { 
             for (int n = 0; n < 4; n++)
@@ -292,6 +310,12 @@ public class FreightTrackNetwork
                 if (neighbor == null || !tentativedistances.Contains(neighbor))
                     continue;
                 neighborindex = neighbor.JunctionIndex;
+                if (neighborindex >= distances.Length || currentnode >= distances.Length)
+                {
+                    Debug.LogWarning("FreightTrackNetwork RouteFind checking neighbor junction outside of range");
+                    this.ResetJunctionIndices();
+                    return new Stack<FreightTrackJunction>();
+                }
                 initialdis = distances[neighborindex];
                 currentdis = distances[currentnode];
                 tryroute = currentdis + neighbor.SegmentDistances[n];
@@ -311,21 +335,41 @@ public class FreightTrackNetwork
             freightnode = tentativedistances.Dequeue();
             currentnode = freightnode.JunctionIndex;
         }
+        //Debug.LogWarning("FreightTrackNetwork RouteFind DEBUG - after loop");
         if (freightnode != destination)
         {
             Debug.LogWarning("FreightTrackNetwork Route Find completed path finding with junction other than the destination?");
             return new Stack<FreightTrackJunction>();
         }
+        if (currentnode >= previousnode.Length)
+        {
+            Debug.LogWarning("FreightTrackNetwork RouteFind trying to trace back previousnode out of range");
+            this.ResetJunctionIndices();
+            return new Stack<FreightTrackJunction>();
+        }
         //Push the destination onto the route stack and get the first previous junction
         CartRoute.Push(freightnode);
         int prevnode = previousnode[currentnode];
-
+        int safetycount = 0;
         //Trace back to the start by each of the previous junctions anding with the starting junction
         while (prevnode != -1)
         {
             freightnode = localjunctions[prevnode];
             CartRoute.Push(freightnode);
             prevnode = previousnode[prevnode];
+            if (prevnode >= previousnode.Length)
+            {
+                Debug.LogWarning("FreightTrackNetwork RouteFind trying to trace back previousnode out of range on path");
+                this.ResetJunctionIndices();
+                return new Stack<FreightTrackJunction>();
+            }
+            safetycount++;
+            if (safetycount > 255)
+            {
+                Debug.LogWarning("FreightTrackNetwork CartRoute failed construction or path has over 255 visited junctions!");
+                CartRoute = null;
+                return new Stack<FreightTrackJunction>();
+            }
         }
         //The above loop automatically pushes the start junction and since the cart is assumed to be there we'll just toss it out as part of a sanity check
         if (CartRoute.Pop() != start)

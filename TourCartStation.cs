@@ -15,6 +15,8 @@ public class TourCartStation : MachineEntity
     public TourStationWindow MachineWindow = new TourStationWindow();
     public FreightTrackJunction ClosestJunction;
     public int JunctionDirection = -1;
+    public static int TourBasicID = ModManager.mModMappings.ItemsByKey["steveman0.FreightTourBasic"].ItemId;
+    private bool RotationUpdated;
 
     public TourCartStation(ModCreateSegmentEntityParameters parameters)
       : base(parameters)
@@ -65,16 +67,27 @@ public class TourCartStation : MachineEntity
     {
         if (this.hopper == null)
             this.UpdateAttachedHoppers();
+        if (this.ClosestJunction != null && this.TrackNetwork != null && this.ClosestJunction.TrackNetwork != this.TrackNetwork)
+        {
+            if (this.TrackNetwork.TourCartStations.ContainsKey(this.StationName))
+                this.TrackNetwork.TourCartStations.Remove(this.StationName);
+            this.TrackNetwork = null;
+            this.ClosestJunction.ConnectedSegments[this.JunctionDirection] = null;
+            this.ClosestJunction.ConnectedJunctions[this.JunctionDirection] = null;
+            this.ClosestJunction = null;
+            this.JunctionDirection = -1;
+        }
     }
 
     public void TravelTo(TourCartStation station, FreightTrackJunction start)
     {
-        if (station != null && station.JunctionDirection != -1 && station.ClosestJunction != null && (WorldScript.mLocalPlayer.mInventory.TryAndGetItem(111) != null || this.hopper.TryExtractItems((StorageUserInterface)this, ItemEntries.TourCart, 1)))
+        if (station != null && station.JunctionDirection != -1 && station.ClosestJunction != null)
         {
-            FreightCartMob tourcart = MobManager.instance.SpawnMob(MobType.Mod, "steveman0.FreightCart_Tour", this.mSegment, this.mnX, this.mnY + (long)this.mForwards.y + 1L, this.mnZ, new Vector3(0.0f, 0.0f, 0.0f), this.mForwards) as FreightCartMob;
-            WorldScript.instance.localPlayerInstance.mbRidingCart = true;
-            WorldScript.instance.localPlayerInstance.mRideCart = tourcart.MinecartShell;
-            WorldScript.instance.localPlayerInstance.mbGravity = false;
+            string mobtype = this.GetSpawnedCartType();
+            if (string.IsNullOrEmpty(mobtype))
+                return;
+            FreightCartMob tourcart = MobManager.instance.SpawnMob(MobType.Mod, mobtype, this.mSegment, this.mnX, this.mnY + (long)this.mForwards.y + 1L, this.mnZ, new Vector3(0.0f, 0.0f, 0.0f), this.mForwards) as FreightCartMob;
+            ManagerSync.TourCart = tourcart;
             tourcart.DestinationJunction = station.ClosestJunction;
             tourcart.DestinationDirection = station.JunctionDirection;
             tourcart.JunctionRoute = station.TrackNetwork.RouteFind(start, station.ClosestJunction);
@@ -82,9 +95,23 @@ public class TourCartStation : MachineEntity
         }
     }
 
+    private string GetSpawnedCartType()
+    {
+        if ((WorldScript.mLocalPlayer.mInventory.GetItemCount(111) > 0 && WorldScript.mLocalPlayer.mInventory.RemoveItem(111, 1) == 1) || (this.hopper != null && this.hopper.TryExtractItems((StorageUserInterface)this, ItemEntries.TourCart, 1)))
+            return "steveman0.FreightCart_Tour";
+        else if ((WorldScript.mLocalPlayer.mInventory.GetItemCount(TourBasicID) > 0 && WorldScript.mLocalPlayer.mInventory.RemoveItem(TourBasicID, 1) == 1) || (this.hopper != null && this.hopper.TryExtractItems((StorageUserInterface)this, TourBasicID, 1)))
+            return "steveman0.FreightCart_TourBasic";
+        return string.Empty;
+    }
+
     public override void UnityUpdate()
     {
         UIUtil.DisconnectUI(this);
+        if (this.RotationUpdated)
+        {
+            this.HoloPreview.transform.forward = this.mForwards;
+            this.RotationUpdated = false;
+        }
         if (this.mbLinkedToGO || this.mWrapper == null || !this.mWrapper.mbHasGameObject)
             return;
         if (this.mWrapper.mGameObjectList == null)
@@ -154,7 +181,7 @@ public class TourCartStation : MachineEntity
         this.mFlags = newFlags;
         this.mForwards = SegmentCustomRenderer.GetRotationQuaternion(this.mFlags) * Vector3.forward;
         this.mForwards.Normalize();
-        this.HoloPreview.transform.forward = this.mForwards;
+        this.RotationUpdated = true;
     }
 
     public override void OnDelete()

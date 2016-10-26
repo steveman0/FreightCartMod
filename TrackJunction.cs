@@ -77,7 +77,7 @@ public class FreightTrackJunction : MachineEntity
         if (count > 0)
         {
             str2 = count.ToString() + " valid track connections\n";
-            str3 = "Track lengths: " + str.Substring(0, str.Length - 2) + "\n";
+            str3 = "Track lengths: " + str.Substring(0, str.Length - 2) + "\nPress Q to reset the junction\n";
         }
         else
         {
@@ -93,6 +93,8 @@ public class FreightTrackJunction : MachineEntity
             //    str5 = str5.Substring(0, str5.Length - 2) + "\n";
         }
 
+        if (Input.GetButtonDown("Extract"))
+            TrackJunctionWindow.ResetJunction(this);
 
         return str1 + str2 + str3 + str4 + str5;
     }
@@ -346,7 +348,7 @@ public class FreightTrackJunction : MachineEntity
                 this.SegmentDistances[initialdirection] = 2 * n + 1;
                 this.ConnectedSegments[initialdirection] = tracksegment;
                 this.LinkStatusDirty = true;
-                if (!string.IsNullOrEmpty(station.StationName))
+                if (!string.IsNullOrEmpty(station.StationName) && !this.TrackNetwork.TourCartStations.ContainsKey(station.StationName))
                     this.TrackNetwork.TourCartStations.Add(station.StationName, station);
                 return true;
             }
@@ -381,6 +383,8 @@ public class FreightTrackJunction : MachineEntity
                 }
             }
             VisitedTracks.Add(visitedpiece);
+            if (n == 511)
+                Debug.LogWarning("Track Junction Found track length > 512m -> ending search.");
         }
         return false;
     }
@@ -388,7 +392,7 @@ public class FreightTrackJunction : MachineEntity
     {
         if (!mbLinkedToGO)
         {
-            if (mWrapper == null || SpawnableObjectManagerScript.instance == null || SpawnableObjectManagerScript.instance.maSpawnableObjects == null || SpawnableObjectManagerScript.instance.maSpawnableObjects[(int)SpawnableObjectEnum.Minecart_Track_Straight] == null)
+            if (mWrapper == null || mWrapper.mGameObjectList == null || SpawnableObjectManagerScript.instance == null || SpawnableObjectManagerScript.instance.maSpawnableObjects == null || SpawnableObjectManagerScript.instance.maSpawnableObjects[(int)SpawnableObjectEnum.Minecart_Track_Straight] == null)
             {
                 return;
             }
@@ -401,12 +405,11 @@ public class FreightTrackJunction : MachineEntity
                 this.CrossTrack.transform.eulerAngles = new Vector3(0, 90f, 0);
                 this.CrossTrack.transform.localScale = new Vector3(0.99f, 0.99f, 0.99f);
                 this.CrossTrack.SetActive(true);
-
                 this.mbLinkedToGO = true;
                 this.LinkStatusDirty = true;
             }
         }
-        if (this.mbLinkedToGO && this.LinkStatusDirty)
+        if (this.mbLinkedToGO && this.LinkStatusDirty && this.CrossTrack != null)
         {
             Color value = Color.red;
             int links = 0;
@@ -441,6 +444,14 @@ public class FreightTrackJunction : MachineEntity
                 comp2[i].SetPropertyBlock(materialPropertyBlock);
             this.LinkStatusDirty = false;
         }
+    }
+
+    public override void UnitySuspended()
+    {
+        GameObject.Destroy(this.CrossTrack);
+        this.CrossTrack = null;
+        this.mbLinkedToGO = false;
+        base.UnitySuspended();
     }
 
     /// <summary>
@@ -505,6 +516,15 @@ public class FreightTrackJunction : MachineEntity
         mSegment.maCubeData[(y << 8) + (z << 4) + x].meFlags = this.mFlags;
     }
 
+    public void ResetJunction()
+    {
+        this.OnDelete();
+        Array.Clear(this.ConnectedJunctions, 0, 4);
+        Array.Clear(this.ConnectedSegments, 0, 4);
+        Array.Clear(this.SegmentDistances, 0, 4);
+        this.TrackNetwork = new FreightTrackNetwork(this);
+    }
+
     public override void OnDelete()
     {
         for (int n = 0; n < 4; n++)
@@ -535,6 +555,38 @@ public class FreightTrackJunction : MachineEntity
         }
         this.TrackNetwork.TrackJunctions.Remove(this);
         this.TrackNetwork.NetworkIntegrityCheck(this.ConnectedJunctions.ToList());
+    }
+
+    public void InvalidConnection(FreightTrackJunction missingtarget)
+    {
+        for (int n = 0; n < 4; n++)
+        {
+            //Remove this from connected junctions/segments from all connected neighbors
+            FreightTrackJunction junc = this.ConnectedJunctions[n];
+            if (junc == null || junc != missingtarget)
+                continue;
+            for (int m = 0; m < 4; m++)
+            {
+                FreightTrackJunction junc2 = missingtarget.ConnectedJunctions[m];
+                if (junc2 == null)
+                    continue;
+                if (junc2 == this)
+                {
+                    junc.ConnectedJunctions[m] = null;
+                    junc.LinkStatusDirty = true;
+                }
+            }
+            for (int m = 0; m < 4; m++)
+            {
+                FreightTrackSegment seg = missingtarget.ConnectedSegments[m];
+                if (seg == null)
+                    continue;
+                if (seg.ConnectedJunctions.Contains(this))
+                    junc.ConnectedSegments[m] = null;
+            }
+            this.ConnectedJunctions[n] = null;
+            this.ConnectedSegments[n] = null;
+        }
     }
 
     public override bool ShouldSave()

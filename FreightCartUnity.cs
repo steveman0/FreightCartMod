@@ -54,6 +54,7 @@ public class FreightCartUnity : MonoBehaviour
 
     private void Start()
     {
+        //this.gameObject.AddComponent<Rideable>();
         GameObjectWrapper gameObjectWrapper = this.GetComponent<SpawnableObjectScript>().wrapper;
         if (gameObjectWrapper == null)
             return;
@@ -140,6 +141,8 @@ public class FreightCartUnity : MonoBehaviour
     private void Update()
     {
         this.mrTimeUntilNextVisualPositionUpdate -= Time.deltaTime;
+        if (DestroyCalled)
+            GetComponent<Rideable>().DestroyCalled = true;
         if (this.mob == null)
             return;
         if (this.mob.mnHealth <= 0 && this.mbConfigured || !this.mob.mbActive)
@@ -228,11 +231,6 @@ public class FreightCartUnity : MonoBehaviour
                 this.mLook.x = vector8.a;
                 this.mLook.y = vector8.b;
                 this.mLook.z = vector8.c;
-                if (this.mob.mObjectType == SpawnableObjectEnum.Minecart_T10 && this.mob.MinecartShell != null)
-                {
-                    this.mob.MinecartShell.gameObject.transform.position = new Vector3(vector8.x, vector8.y, vector8.z);
-                    this.mob.MinecartShell.gameObject.transform.forward = new Vector3(vector8.a, vector8.b, vector8.c);
-                }
                 if (this.mob.meLoadState == FreightCartMob.eLoadState.eLoading)
                     this.mLook.y = 0.0f;
                 if (this.mob.meLoadState == FreightCartMob.eLoadState.eUnloading)

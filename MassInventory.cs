@@ -5,6 +5,7 @@ using UnityEngine;
 
 public class MassInventory
 {
+    private string name;
     public MassStorageCrate MassStorage;
     public List<KeyValuePair<ItemBase, int>> Inventory;
     public string NetworkID; //Not sure I still need this - can probably strip it out but keeping it to be safe
@@ -67,6 +68,11 @@ public class MassInventory
         this.Inventory = items;
     }
 
+    public string Name
+    {
+        get { return string.IsNullOrEmpty(this.name) ? "UNNAMED" : this.name; }
+        set { this.name = value; }
+    }
 
     public void RemoveNetwork(FreightCartStation station, string networkid)
     {

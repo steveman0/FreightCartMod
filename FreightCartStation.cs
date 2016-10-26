@@ -8,6 +8,7 @@ using System.IO;
 public class FreightCartStation : MachineEntity
 {
     public int StationID;
+    public string StationName;
     public static int FreightStationIDs = 0;
     public float mrMaxPower = 100f;
     public float mrMaxTransferRate = 100f;
@@ -39,22 +40,26 @@ public class FreightCartStation : MachineEntity
     public long cratez;
     public List<FreightRegistry> localregistry;
     private bool RegWriteRequired = false;
+    private string CachedInvName;
 
     public MassStorageCrate LocalCrate;
     public MassStorageCrate massStorageCrate;
     public MassInventory ConnectedInventory;
     public string NetworkID;
-    FreightCartWindow machineWindow = new FreightCartWindow();
+    //FreightCartWindow machineWindow = new FreightCartWindow();
     public int UIdelay = 0;
     public bool UILock = false;
     private float popuptimer = 0f;
     public List<FreightRegistry> LocalDeficits = new List<FreightRegistry>();
     public List<FreightRegistry> LocalSurplus = new List<FreightRegistry>();
+    public bool OfferAll = false;
 
     public FreightTrackJunction ClosestJunction;
     public int JunctionDirection = -1;
     public int AssignedCarts;
     public int AvailableCarts;
+    public int CartTier = 0;
+    public List<FreightCartMob> CartList = new List<FreightCartMob>();
 
     //public MobEntity SpawnedCart;
 
@@ -104,9 +109,9 @@ public class FreightCartStation : MachineEntity
         //    this.chatwindowclose = false;
         //}
 
-        UIUtil.HandleThisMachineWindow(this, this.machineWindow);
+        //UIUtil.HandleThisMachineWindow(this, this.machineWindow);
 
-        string str1 = "Freight Cart Station (ID: " + this.StationID.ToString() + ")";
+        string str1 = "Freight Cart Station (" + (!string.IsNullOrEmpty(this.StationName) ? this.StationName : ("ID: " + this.StationID.ToString())) + ")";
         if (string.IsNullOrEmpty(this.NetworkID))
             str1 += " - NO NETWORK\nPress E to configure this station\n";
         else
@@ -268,7 +273,7 @@ public class FreightCartStation : MachineEntity
 
     public override void UnityUpdate()
     {
-        UIUtil.DisconnectUI(this);
+        //UIUtil.DisconnectUI(this);
         //if (this.SpawnedCart != null && SpawnedCart.mWrapper != null && SpawnedCart.mWrapper.mGameObjectList.Count != 0)
         //{
         //    //Component[] obj = SpawnedCart.mWrapper.mGameObjectList[0].gameObject.GetComponentsInChildren(typeof(Component));
@@ -507,6 +512,11 @@ public class FreightCartStation : MachineEntity
         {
             //Debug.LogWarning("Station is not registered");
             this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
+            if (this.ConnectedInventory != null && !string.IsNullOrEmpty(this.CachedInvName))
+            {
+                this.ConnectedInventory.Name = this.CachedInvName;
+                this.CachedInvName = null;
+            }
         }
     }
 
@@ -766,6 +776,21 @@ public class FreightCartStation : MachineEntity
         //FreightCartManager.instance.DebugFreight();
     }
 
+    public string CartTierLabel()
+    {
+        switch (this.CartTier)
+        {
+            case 0:
+                return "Any";
+            case 1:
+                return "T2/T3+";
+            case 2:
+                return "T4 only";
+            default:
+                return "Unknown Tier";
+        }
+    }
+
     public override void OnDelete()
     {
         FreightCartManager.instance.RemoveStationReg(this);
@@ -774,7 +799,7 @@ public class FreightCartStation : MachineEntity
 
     public override int GetVersion()
     {
-        return 1;
+        return 5;
     }
 
     public override bool ShouldSave()
@@ -900,6 +925,16 @@ public class FreightCartStation : MachineEntity
 
         writer.Write(this.AssignedCarts);
         writer.Write(this.mbWaitForFullLoad);
+        writer.Write(this.OfferAll);
+        if (!string.IsNullOrEmpty(this.StationName))
+            writer.Write(this.StationName);
+        else
+            writer.Write(string.Empty);
+        if (this.ConnectedInventory != null && !string.IsNullOrEmpty(this.ConnectedInventory.Name))
+            writer.Write(this.ConnectedInventory.Name);
+        else
+            writer.Write(string.Empty);
+        writer.Write(this.CartTier);
     }
 
     public override void Read(BinaryReader reader, int entityVersion)
@@ -953,11 +988,25 @@ public class FreightCartStation : MachineEntity
         //Check if the storage has been registered and add it if missing
         this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
 
-        if (entityVersion == 1)
+        if (entityVersion >= 1)
         {
             this.AssignedCarts = reader.ReadInt32();
             this.mbWaitForFullLoad = reader.ReadBoolean();
         }
+        if (entityVersion >= 2)
+            this.OfferAll = reader.ReadBoolean();
+        if (entityVersion >= 3)
+            this.StationName = reader.ReadString();
+        if (entityVersion >= 4)
+        {
+            if (this.ConnectedInventory != null)
+                this.ConnectedInventory.Name = reader.ReadString();
+            else
+                this.CachedInvName = reader.ReadString();
+        }
+        if (entityVersion >= 5)
+            this.CartTier = reader.ReadInt32();
+
     }
 
     public override HoloMachineEntity CreateHolobaseEntity(Holobase holobase)
