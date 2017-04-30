@@ -208,11 +208,29 @@ public class TourCartStation : MachineEntity
         return true;
     }
 
+    public override bool ShouldNetworkUpdate()
+    {
+        return true;
+    }
+
     public override int GetVersion()
     {
         return 1;
     }
 
+    public override void ReadNetworkUpdate(BinaryReader reader)
+    {
+        string oldname = this.StationName;
+        this.StationName = reader.ReadString();
+        if (this.StationName != oldname && this.TrackNetwork != null && this.TrackNetwork.TourCartStations.ContainsKey(oldname))
+        {
+            this.TrackNetwork.TourCartStations.Remove(oldname);
+            if (!this.TrackNetwork.TourCartStations.ContainsKey(this.StationName))
+                this.TrackNetwork.TourCartStations.Add(this.StationName, this);
+        }
+    }
+
+    //Used for network write as well
     public override void Write(BinaryWriter writer)
     {
         if (string.IsNullOrEmpty(this.StationName))

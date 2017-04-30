@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+﻿using System;
 using UnityEngine;
 using System.Linq;
 using System.Collections.Generic;
@@ -8,7 +8,7 @@ using System.IO;
 public class FreightCartStation : MachineEntity
 {
     public int StationID;
-    public string StationName;
+    public string StationName = string.Empty;
     public static int FreightStationIDs = 0;
     public float mrMaxPower = 100f;
     public float mrMaxTransferRate = 100f;
@@ -35,6 +35,7 @@ public class FreightCartStation : MachineEntity
     private bool mbPlayLoadAnim;
     public float mrCurrentPower;
 
+    // Local freight connection
     public long cratex;
     public long cratey;
     public long cratez;
@@ -42,26 +43,36 @@ public class FreightCartStation : MachineEntity
     private bool RegWriteRequired = false;
     private string CachedInvName;
 
+    // Mass storage freight needs
     public MassStorageCrate LocalCrate;
     public MassStorageCrate massStorageCrate;
     public MassInventory ConnectedInventory;
     public string NetworkID;
-    //FreightCartWindow machineWindow = new FreightCartWindow();
-    public int UIdelay = 0;
-    public bool UILock = false;
     private float popuptimer = 0f;
     public List<FreightRegistry> LocalDeficits = new List<FreightRegistry>();
     public List<FreightRegistry> LocalSurplus = new List<FreightRegistry>();
     public bool OfferAll = false;
 
+    // Track network systems
     public FreightTrackJunction ClosestJunction;
     public int JunctionDirection = -1;
     public int AssignedCarts;
     public int AvailableCarts;
     public int CartTier = 0;
+    public float StationFull;
+    public bool FullQueue;
     public List<FreightCartMob> CartList = new List<FreightCartMob>();
 
-    //public MobEntity SpawnedCart;
+    //Freight Interface
+    public FreightSystemInterface AttachedInterface;
+    public StorageMachineInterface hopper;
+    public HopperFreightContainer HopperInterface;
+    public List<FreightListing> LocalDefListing = new List<FreightListing>();
+    public List<FreightListing> LocalSurListing = new List<FreightListing>();
+    public ItemBase readOffer;
+    public int readOfferamount; 
+    public ItemBase readRequest;
+    public int readRequestamount;
 
     public FreightCartStation(ModCreateSegmentEntityParameters parameters)
         : base(parameters)
@@ -98,7 +109,7 @@ public class FreightCartStation : MachineEntity
         this.mbLinkedToGO = false;
         this.mAnimation = (Animation)null;
         this.LoaderBase = (GameObject)null;
-        this.mAudioSource = (AudioSource)null;
+        
     }
 
     public override string GetPopupText()
@@ -127,39 +138,96 @@ public class FreightCartStation : MachineEntity
                 this.LocalSurplus = FreightCartManager.instance.GetLocalSurplus(this.NetworkID, this.massStorageCrate);
                 this.popuptimer = 1.5f;
             }
+            else if (this.popuptimer < 0 && this.AttachedInterface != null)
+            {
+                this.LocalDefListing = this.AttachedInterface.FreightRequests.OrderByDescending(x => x.Quantity).Take(3).ToList();
+                this.LocalSurListing = this.AttachedInterface.FreightOfferings.OrderByDescending(x => x.Quantity).Take(3).ToList();
+                this.popuptimer = 1.5f;
+            }
+            else if (this.popuptimer < 0 && this.HopperInterface != null)
+            {
+                this.LocalDefListing = this.HopperInterface.FreightRequests.OrderByDescending(x => x.Quantity).Take(3).ToList();
+                this.LocalSurListing = this.HopperInterface.FreightOfferings.OrderByDescending(x => x.Quantity).Take(3).ToList();
+                this.popuptimer = 1.5f;
+            }
             else
                 this.popuptimer -= Time.deltaTime;
 
             //Debug.Log("Deficit count: " + this.LocalDeficits.Count);
-            if (this.LocalDeficits.Count <= 0)
+            int count = this.LocalDefListing.Count;
+            if ((this.LocalDeficits.Count <= 0 && count <= 0) || (count == 1 && this.LocalDefListing[0].Quantity == 0))
                 str2 = "This storage is fully stocked!\n";
             else
-                str2 = "Top requests for this storage:\n";
-            for (int index = 0; index < this.LocalDeficits.Count; index++)
-            {
-                //Debug.Log("Are we trying to print deficits? : " + index + " the actual deficit: " + this.LocalDeficits[index].Deficit);
-                if (this.LocalDeficits[index].Deficit != 0)
-                    str2 += (index + 1).ToString() + ") " + this.LocalDeficits[index].Deficit.ToString("N0") + "x " + ItemManager.GetItemName(this.LocalDeficits[index].FreightItem) + "\n";
-            }
+                str2 = "Top requests for this station:\n";
 
-            if(this.LocalSurplus.Count <= 0)
+            if (this.AttachedInterface != null || this.HopperInterface != null)
+            {
+                for (int n = 0; n < this.LocalDefListing.Count; n++)
+                {
+                    if (this.LocalDefListing[n].Quantity != 0)
+                        str2 += (n + 1).ToString() + ") " + this.LocalDefListing[n].Quantity.ToString("N0") + "x " + ItemManager.GetItemName(this.LocalDefListing[n].Item) + "\n";
+                }
+            }
+            else
+            {
+                for (int index = 0; index < this.LocalDeficits.Count; index++)
+                {
+                    //Debug.Log("Are we trying to print deficits? : " + index + " the actual deficit: " + this.LocalDeficits[index].Deficit);
+                    if (this.LocalDeficits[index].Deficit != 0)
+                        str2 += (index + 1).ToString() + ") " + this.LocalDeficits[index].Deficit.ToString("N0") + "x " + ItemManager.GetItemName(this.LocalDeficits[index].FreightItem) + "\n";
+                }
+            }
+            int c = this.LocalSurListing.Count;
+            if ((this.LocalSurplus.Count <= 0 && c <= 0) || (c == 1 && this.LocalSurListing[0].Quantity == 0)) // hopper interface :/
                 str3 = "This storage has nothing to offer!\n";
             else
-                str3 = "Top offerings for this storage:\n";
-            for (int index = 0; index < this.LocalSurplus.Count; index++)
+                str3 = "Top offerings for this station:\n";
+
+            if (this.AttachedInterface != null || this.HopperInterface != null)
             {
-                //Debug.Log("Are we trying to print surplus? : " + index);
-                if (this.LocalSurplus[index].Surplus != 0)
-                    str3 += (index + 1).ToString() + ") " + this.LocalSurplus[index].Surplus.ToString("N0") + "x " + ItemManager.GetItemName(this.LocalSurplus[index].FreightItem) + "\n";
+                for (int n = 0; n < this.LocalSurListing.Count; n++)
+                {
+                    if (this.LocalSurListing[n].Quantity != 0)
+                        str3 += (n + 1).ToString() + ") " + this.LocalSurListing[n].Quantity.ToString("N0") + "x " + ItemManager.GetItemName(this.LocalSurListing[n].Item) + "\n";
+                }
+            }
+            else
+            {
+                for (int index = 0; index < this.LocalSurplus.Count; index++)
+                {
+                    //Debug.Log("Are we trying to print surplus? : " + index);
+                    if (this.LocalSurplus[index].Surplus != 0)
+                        str3 += (index + 1).ToString() + ") " + this.LocalSurplus[index].Surplus.ToString("N0") + "x " + ItemManager.GetItemName(this.LocalSurplus[index].FreightItem) + "\n";
+                }
             }
         }
 
 
         //Freight registry copy+paste
-        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetButtonDown("Extract") && this.massStorageCrate != null && !string.IsNullOrEmpty(this.NetworkID))
-            FreightCartWindow.CopyFreight(this);
-        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetButtonDown("Store") && this.massStorageCrate != null && !string.IsNullOrEmpty(this.NetworkID) && FreightCartManager.instance.CopiedFreightStation != null)
-            FreightCartWindow.PasteFreight(this);
+        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetButtonDown("Extract"))
+        {
+            if (this.massStorageCrate != null && !string.IsNullOrEmpty(this.NetworkID))
+            {
+                FreightCartWindow.CopyFreight(this);
+                FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Freight Copied", Color.cyan, 1.5f);
+            }
+            else if (this.massStorageCrate == null)
+                FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Connect Mass Storage", Color.red, 1.5f);
+            else if (!string.IsNullOrEmpty(this.NetworkID))
+                FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Configure Station", Color.red, 1.5f);
+        }
+        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetButtonDown("Store"))
+        {
+            if (this.massStorageCrate != null && FreightCartManager.instance.CopiedFreightStation != null)
+            {
+                FreightCartWindow.PasteFreight(this);
+                FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Freight Pasted", Color.cyan, 1.5f);
+            }
+            else if (this.massStorageCrate == null)
+                FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Connect Mass Storage", Color.red, 1.5f);
+            else if (FreightCartManager.instance.CopiedFreightStation == null)
+                FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "No entries to paste!", Color.red, 1.5f);
+        }
 
         string str4 = "";
         string str5 = "\n";
@@ -321,6 +389,12 @@ public class FreightCartStation : MachineEntity
             this.mbPlayLoadAnim = false;
             AudioSoundEffectManager.instance.PlayPositionEffect(AudioSoundEffectManager.instance.MinecartStationLoadAddBlock, this.mUnityPosition, 1f, 8f);
         }
+
+        if (this.FullQueue)
+        {
+            ARTHERPetSurvival.instance.SetARTHERReadoutText("Freight Cart Station " + (string.IsNullOrEmpty(StationName) ? "UNNAMED" : this.StationName) + " could not deposit item into storage.  Storage is full.");
+            this.FullQueue = false;
+        }
         //if ((int)this.mValue != 3)
         //    return;
         //if ((double)this.mrCartOnUs <= 0.0)
@@ -382,47 +456,17 @@ public class FreightCartStation : MachineEntity
 
     public override void LowFrequencyUpdate()
     {
-        //++this.mnUpdates;
-        this.MassStorageChecks();
-        this.mrCartOnUs -= LowFrequencyThread.mrPreviousUpdateTimeStep;
-        //if (this.mnNumAttachedValidHoppers == 0 && this.mnUpdates % 10 == 0 && (double)this.mDistanceToPlayer < 64.0)
-        //{
-        //    //if ((int)this.mValue == 4)
-        //    //    this.UpdateAttachedHoppers(false);
-        //    //if ((int)this.mValue == 3)
-        //    //    this.UpdateAttachedHoppers(true);
-        //}
-        //if (this.mrCartOnUs <= 0.0)
-        //    return;
-        //if (this.mProferredItem == null && (int)this.mValue == 4)
-        //{
-        //    //this.UpdateAttachedHoppers(false);
-        //    if (this.mnNumAttachedValidHoppers > 0)
-        //    {
-        //        this.mProferredItem = this.maAttachedHoppers[0].RemoveFirstInventoryItemOrDecrementStack();
-        //        this.mbPlayLoadAnim = true;
-        //        this.maAttachedHoppers[0].RequestImmediateNetworkUpdate();
-        //    }
-        //}
-        //if (this.mProferredItem == null || (int)this.mValue != 3)
-        //    return;
-        //this.UpdateAttachedHoppers(true);
-        //if (this.mnNumAttachedValidHoppers <= 0)
-        //    return;
-        //this.maAttachedHoppers[0].AddItem(this.mProferredItem);
-        //this.maAttachedHoppers[0].RequestImmediateNetworkUpdate();
-        //this.mProferredItem = (ItemBase)null;
+        ++this.mnUpdates;
+        if (this.mnUpdates % 50 == 0 && !string.IsNullOrEmpty(this.NetworkID) && this.massStorageCrate != null && string.IsNullOrEmpty(this.StationName) && this.AssignedCarts == 0 && !this.mbWaitForFullLoad && this.CartTier == 0 && !this.OfferAll)
+        {
+            if (FreightCartManager.instance.GetFreightEntries(this.NetworkID, this.massStorageCrate).Count == 0)
+                Debug.LogWarning("A freight cart station has no freight entries! Did it lose its settings? Local time: " + System.DateTime.Now.ToString("h:mm:ss tt"));
+        }
+        if (HopperInterface == null && AttachedInterface == null)
+            this.MassStorageChecks();
 
-        //if (this.UIdelay < 0 && UIManager.AllowMovement)
-        //{
-        //    GenericMachinePanelScript panel = GenericMachinePanelScript.instance;
-        //    GenericMachineManager manager2 = typeof(GenericMachinePanelScript).GetField("manager", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(GenericMachinePanelScript.instance) as GenericMachineManager;
-        //    manager2.windows[eSegmentEntity.Mod] = null;
-        //    panel.currentWindow = null;
-        //    panel.targetEntity = null;
-        //    panel.gameObject.SetActive(false);
-        //    panel.Background_Panel.SetActive(false);
-        //}
+        this.mrCartOnUs -= LowFrequencyThread.mrPreviousUpdateTimeStep;
+        this.StationFull -= LowFrequencyThread.mrPreviousUpdateTimeStep;
     }
 
     public void MassStorageChecks()
@@ -484,9 +528,10 @@ public class FreightCartStation : MachineEntity
                 }
             }
         }
-        if (this.massStorageCrate != null)
+        if (this.massStorageCrate != null && this.RegWriteRequired)
         {
-            if (this.massStorageCrate.mnX == this.cratex && this.massStorageCrate.mnY == this.cratey && this.massStorageCrate.mnZ == this.cratez)
+            //Removed the crate check as there may be cases that the center doesn't initialize the same as previously causing loss of the registry
+            // if (this.massStorageCrate.mnX == this.cratex && this.massStorageCrate.mnY == this.cratey && this.massStorageCrate.mnZ == this.cratez)
                 this.WriteLocalRegToMaster();
         }
         //Debug.LogWarning("FCS just before checking if mass inventory is null Station ID: " + this.StationID.ToString());
@@ -523,8 +568,27 @@ public class FreightCartStation : MachineEntity
     public int DepositItem(ItemBase item)
     {
         int remainder = item.GetAmount();
-        if (this.massStorageCrate == null || this.massStorageCrate.mbDelete)
+        if (this.hopper != null)
+        {
+            if (this.HopperInterface != null)
+            {
+                bool completed = this.HopperInterface.ReceiveFreight(item);
+                return completed ? 0 : remainder;
+            }
+            else
+                Debug.LogWarning("FreightCartStation tried to deposit an item with hopper that had no hopperinterface!");
             return remainder;
+        }
+        if (this.AttachedInterface != null)
+        {
+            bool completed = this.AttachedInterface.ReceiveFreight(item);
+            return completed ? 0 : remainder;
+        }
+        if (this.massStorageCrate == null || this.massStorageCrate.mbDelete)
+        {
+            Debug.LogWarning("FreightCartStation was asked to deposit item but mass storage crate is missing");
+            return remainder;
+        }
 
         if (item.IsStack())
         {
@@ -640,6 +704,8 @@ public class FreightCartStation : MachineEntity
                 }
             }
         }
+        this.StationFull = 60;
+        this.FullQueue = true;
         return remainder;
     }
 
@@ -647,6 +713,26 @@ public class FreightCartStation : MachineEntity
     {
         int remainder = item.GetAmount();
         itemout = null;
+        if (this.hopper != null)
+        {
+            if (this.HopperInterface != null)
+            {
+                bool completed = this.HopperInterface.ProvideFreight(item);
+                if (completed)
+                    itemout = item.SetAmount(1);
+                return completed ? 0 : remainder;
+            }
+            else
+                Debug.LogWarning("FreightCartStation tried to withdraw an item with hopper that had no hopperinterface!");
+            return remainder;
+        }
+        if (this.AttachedInterface != null)
+        {
+            bool completed = this.AttachedInterface.ProvideFreight(item);
+            if (completed)
+                itemout = item.SetAmount(1);
+            return completed ? 0 : remainder;
+        }
         if (this.massStorageCrate == null || this.massStorageCrate.mbDelete)
             return remainder;
 
@@ -720,6 +806,7 @@ public class FreightCartStation : MachineEntity
 
     private void SearchForCrateNeighbours(long x, long y, long z)
     {
+        bool segmentwaiting = false;
         for (int index = 0; index < 8; ++index)
         {
             //Debug.Log("Searching for crate");
@@ -745,6 +832,7 @@ public class FreightCartStation : MachineEntity
                 if (segment == null)
                 {
                     Debug.Log((object)"SearchForCrateNeighbours did not find segment");
+                    segmentwaiting = true;
                     continue;
                 }
             }
@@ -757,11 +845,74 @@ public class FreightCartStation : MachineEntity
                 this.massStorageCrate = massStorageCrate.GetCenter();
             }
         }
+        // Search for interface only if there are no mass storage crates (don't break old worlds! Effectively prioritizes mass storage over hoppers etc.)
+        if (!segmentwaiting && this.massStorageCrate == null)
+            SearchForInterface(x, y, z);
     }
+
+    private void SearchForInterface(long x, long y, long z)
+    {
+        for (int index = 0; index < 8; ++index)
+        {
+            long x1 = x;
+            long y1 = y;
+            long z1 = z;
+            if (index == 0 || index == 4)
+                --x1;
+            if (index == 1 || index == 5)
+                ++x1;
+            if (index == 2 || index == 6)
+                --z1;
+            if (index == 3 || index == 7)
+                ++z1;
+            if (index >= 4)
+                ++y1;
+
+            Segment segment = this.AttemptGetSegment(x1, y1, z1);
+            if (segment != null)
+            {
+                SegmentEntity entity = segment.SearchEntity(x1, y1, z1);
+                StorageMachineInterface machineInterface = entity as StorageMachineInterface;
+                if (machineInterface != null)
+                {
+                    eHopperPermissions permissions = machineInterface.GetPermissions();
+                    if (permissions != eHopperPermissions.Locked)
+                    {
+                        this.hopper = machineInterface;
+                        this.HopperInterface = new HopperFreightContainer(hopper, this);
+
+                        // Copy in deserialized data
+                        if (this.readOffer != null || this.readRequest != null)
+                        {
+                            this.HopperInterface.OfferItem = this.readOffer;
+                            this.HopperInterface.OfferLimit = this.readOfferamount;
+                            this.HopperInterface.RequestItem = this.readRequest;
+                            this.HopperInterface.RequestLimit = this.readRequestamount;
+                            this.readOffer = null;
+                            this.readRequest = null;
+                        }
+                        FreightCartManager.instance.TryRegisterInterface(this, this.HopperInterface);
+                        return;
+                    }
+                }
+                else
+                {
+                    FreightSystemInterface freightInterface = entity as FreightSystemInterface;
+                    if (freightInterface != null)
+                    {
+                        this.AttachedInterface = freightInterface;
+                        FreightCartManager.instance.TryRegisterInterface(this, this.AttachedInterface);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
 
     public void WriteLocalRegToMaster()
     {
-        if (this.localregistry == null || FreightCartManager.instance.MasterRegistry == null || !this.RegWriteRequired || string.IsNullOrEmpty(this.NetworkID))
+        if (this.localregistry == null || !FreightCartManager.instance.RegistryInitialized() || !this.RegWriteRequired || string.IsNullOrEmpty(this.NetworkID))
             return;
         for (int index = 0; index < this.localregistry.Count; index++)
         {
@@ -786,6 +937,12 @@ public class FreightCartStation : MachineEntity
                 return "T2/T3+";
             case 2:
                 return "T4 only";
+            case 3:
+                return "Ore Freighters Only";
+            case 4:
+                return "T2/T3+ Ore Freighters";
+            case 5:
+                return "T4 Ore Freighters";
             default:
                 return "Unknown Tier";
         }
@@ -799,7 +956,7 @@ public class FreightCartStation : MachineEntity
 
     public override int GetVersion()
     {
-        return 5;
+        return 6;
     }
 
     public override bool ShouldSave()
@@ -815,7 +972,8 @@ public class FreightCartStation : MachineEntity
             segment = WorldScript.instance.GetSegment(x1, y1, z1);
             if (segment == null)
             {
-                Debug.Log((object)"SearchForCrateNeighbours did not find segment");
+                Debug.Log((object)"GetCrateDirect did not find segment");
+                return null;
             }
         }
         if ((int)segment.GetCube(x1, y1, z1) == 527)
@@ -848,6 +1006,24 @@ public class FreightCartStation : MachineEntity
             writer.Write(registries[index].LowStock);
             writer.Write(registries[index].HighStock);
         }
+        if (!string.IsNullOrEmpty(this.StationName))
+            writer.Write(this.StationName);
+        else
+            writer.Write(string.Empty);
+        if (this.ConnectedInventory != null && !string.IsNullOrEmpty(this.ConnectedInventory.Name))
+            writer.Write(this.ConnectedInventory.Name);
+        else
+            writer.Write(string.Empty);
+        writer.Write(this.HopperInterface != null);
+        if (this.HopperInterface != null)
+        {
+            ItemFile.SerialiseItem(this.HopperInterface.OfferItem, writer);
+            writer.Write(HopperInterface.OfferLimit);
+            ItemFile.SerialiseItem(this.HopperInterface.RequestItem, writer);
+            writer.Write(HopperInterface.RequestLimit);
+        }
+
+        writer.Write(this.AvailableCarts);
     }
 
     public override void ReadNetworkUpdate(BinaryReader reader)
@@ -875,66 +1051,105 @@ public class FreightCartStation : MachineEntity
             int LowStock = reader.ReadInt32();
             int HighStock = reader.ReadInt32();
             if (safereg)
-                this.localregistry.Add(new FreightRegistry(this.NetworkID, null, item, LowStock, HighStock));
+                this.localregistry.Add(new FreightRegistry(this.NetworkID, null, item, LowStock, HighStock, FreightRegistry.RegistryType.Registry));
             else
-                this.localregistry.Add(new FreightRegistry(null, null, item, LowStock, HighStock));
+                this.localregistry.Add(new FreightRegistry(null, null, item, LowStock, HighStock, FreightRegistry.RegistryType.Registry));
         }
-        if (this.localregistry != null && registries.Count != this.localregistry.Count)
+        if (this.localregistry.Count > 0 && registries.Count != this.localregistry.Count)
             this.RegWriteRequired = true;
-        this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
+        if (FreightCartManager.instance == null)
+            Debug.Log("FreightCartManager at FreightCartStation Read is null!");
+        else
+            this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
+        this.StationName = reader.ReadString();
+        if (this.ConnectedInventory != null)
+            this.ConnectedInventory.Name = reader.ReadString();
+        else
+            this.CachedInvName = reader.ReadString();
+        if (reader.ReadBoolean())
+        {
+            this.readOffer = ItemFile.DeserialiseItem(reader);
+            this.readOfferamount = reader.ReadInt32();
+            this.readRequest = ItemFile.DeserialiseItem(reader);
+            this.readRequestamount = reader.ReadInt32();
+        }
+
+        this.AvailableCarts = reader.ReadInt32();
     }
 
     public override void Write(BinaryWriter writer)
     {
-        if (!string.IsNullOrEmpty(this.NetworkID))
-            writer.Write(this.NetworkID);
-        else
+        try
         {
-            writer.Write(string.Empty);
-        }
-        if (this.massStorageCrate != null)
-        {
-            writer.Write(true);
-            writer.Write(this.massStorageCrate.mnX);
-            writer.Write(this.massStorageCrate.mnY);
-            writer.Write(this.massStorageCrate.mnZ);
-        }
-        else
-            writer.Write(false);
+            if (!string.IsNullOrEmpty(this.NetworkID))
+                writer.Write(this.NetworkID);
+            else
+            {
+                writer.Write(string.Empty);
+            }
+            if (this.massStorageCrate != null)
+            {
+                writer.Write(true);
+                writer.Write(this.massStorageCrate.mnX);
+                writer.Write(this.massStorageCrate.mnY);
+                writer.Write(this.massStorageCrate.mnZ);
+            }
+            else
+                writer.Write(false);
 
-        if (this.LocalCrate != null)
-        {
-            writer.Write(true);
-            writer.Write(this.LocalCrate.mnX);
-            writer.Write(this.LocalCrate.mnY);
-            writer.Write(this.LocalCrate.mnZ);
-        }
-        else
-            writer.Write(false);
-        
-        List<FreightRegistry> registries = new List<FreightRegistry>();
-        if (this.massStorageCrate != null && this.NetworkID != null)
-             registries = FreightCartManager.instance.GetFreightEntries(this.NetworkID, this.massStorageCrate);
-        writer.Write(registries.Count);
-        for (int index = 0; index < registries.Count; index++)
-        {
-            ItemFile.SerialiseItem(registries[index].FreightItem, writer);
-            writer.Write(registries[index].LowStock);
-            writer.Write(registries[index].HighStock);
-        }
+            if (this.LocalCrate != null)
+            {
+                writer.Write(true);
+                writer.Write(this.LocalCrate.mnX);
+                writer.Write(this.LocalCrate.mnY);
+                writer.Write(this.LocalCrate.mnZ);
+            }
+            else
+                writer.Write(false);
 
-        writer.Write(this.AssignedCarts);
-        writer.Write(this.mbWaitForFullLoad);
-        writer.Write(this.OfferAll);
-        if (!string.IsNullOrEmpty(this.StationName))
-            writer.Write(this.StationName);
-        else
-            writer.Write(string.Empty);
-        if (this.ConnectedInventory != null && !string.IsNullOrEmpty(this.ConnectedInventory.Name))
-            writer.Write(this.ConnectedInventory.Name);
-        else
-            writer.Write(string.Empty);
-        writer.Write(this.CartTier);
+            List<FreightRegistry> registries = new List<FreightRegistry>();
+            if (this.massStorageCrate != null && this.NetworkID != null)
+                registries = FreightCartManager.instance.GetFreightEntries(this.NetworkID, this.massStorageCrate);
+            else if (RegWriteRequired)
+                registries = localregistry;
+            writer.Write(registries.Count);
+            for (int index = 0; index < registries.Count; index++)
+            {
+                ItemFile.SerialiseItem(registries[index].FreightItem, writer);
+                writer.Write(registries[index].LowStock);
+                writer.Write(registries[index].HighStock);
+            }
+
+            writer.Write(this.AssignedCarts);
+            writer.Write(this.mbWaitForFullLoad);
+            writer.Write(this.OfferAll);
+            if (!string.IsNullOrEmpty(this.StationName))
+                writer.Write(this.StationName);
+            else
+                writer.Write(string.Empty);
+            if (this.ConnectedInventory != null && !string.IsNullOrEmpty(this.ConnectedInventory.Name))
+                writer.Write(this.ConnectedInventory.Name);
+            else
+                writer.Write(string.Empty);
+            writer.Write(this.CartTier);
+
+            // Version 6 - Hopper interface 
+            writer.Write(this.HopperInterface != null);
+            if (this.HopperInterface != null)
+            {
+                ItemFile.SerialiseItem(this.HopperInterface.OfferItem, writer);
+                writer.Write(HopperInterface.OfferLimit);
+                ItemFile.SerialiseItem(this.HopperInterface.RequestItem, writer);
+                writer.Write(HopperInterface.RequestLimit);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("FreightCartStation ID '" + this.StationID + "' had an exception while writing to disk! Remarking dirty! Exception: " + e.Message + " stack trace: " + Environment.StackTrace);
+            if (string.IsNullOrEmpty(this.StationName) && this.AssignedCarts == 0 && !this.mbWaitForFullLoad && this.CartTier == 0 && !this.OfferAll)
+                Debug.LogWarning("FreightCartStation wrote to disk on network ID '" + this.NetworkID + "' and had default configuration. Was this intended? Station ID is '" + this.StationID + "'");
+            this.MarkDirtyDelayed();
+        }
     }
 
     public override void Read(BinaryReader reader, int entityVersion)
@@ -978,15 +1193,17 @@ public class FreightCartStation : MachineEntity
             int LowStock = reader.ReadInt32();
             int HighStock = reader.ReadInt32();
             if (safereg)
-                this.localregistry.Add(new FreightRegistry(this.NetworkID, null, item, LowStock, HighStock));
+                this.localregistry.Add(new FreightRegistry(this.NetworkID, null, item, LowStock, HighStock, FreightRegistry.RegistryType.Registry));
             else
-                this.localregistry.Add(new FreightRegistry(null, null, item, LowStock, HighStock));
+                this.localregistry.Add(new FreightRegistry(null, null, item, LowStock, HighStock, FreightRegistry.RegistryType.Registry));
         }
-        if (this.localregistry != null)
+        if (this.localregistry.Count > 0)
             this.RegWriteRequired = true;
-
         //Check if the storage has been registered and add it if missing
-        this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
+        if (FreightCartManager.instance == null)
+            Debug.Log("FreightCartManager at FreightCartStation Read is null!");
+        else
+            this.ConnectedInventory = FreightCartManager.instance.TryRegisterStation(this);
 
         if (entityVersion >= 1)
         {
@@ -1007,6 +1224,18 @@ public class FreightCartStation : MachineEntity
         if (entityVersion >= 5)
             this.CartTier = reader.ReadInt32();
 
+        if (entityVersion >= 6)
+        {
+            if (reader.ReadBoolean())
+            {
+                this.readOffer = ItemFile.DeserialiseItem(reader);
+                this.readOfferamount = reader.ReadInt32();
+                this.readRequest = ItemFile.DeserialiseItem(reader);
+                this.readRequestamount = reader.ReadInt32();
+            }
+        }
+        if (string.IsNullOrEmpty(this.StationName) && this.AssignedCarts == 0 && !this.mbWaitForFullLoad && this.CartTier == 0 && !this.OfferAll)
+            Debug.LogWarning("FreightCartStation loaded from disk with entityversion '" + entityVersion + "' and had default configuration. Did it lose it's settings? Station ID is '" + this.StationID + "'");
     }
 
     public override HoloMachineEntity CreateHolobaseEntity(Holobase holobase)

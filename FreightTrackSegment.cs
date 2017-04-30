@@ -37,6 +37,8 @@ public class FreightTrackSegment
     /// <param name="newnetwork"></param>
     public void TransferOwnership(FreightTrackNetwork oldnetwork, FreightTrackNetwork newnetwork)
     {
+        if (oldnetwork == null || newnetwork == null)
+            return;
         //Debug.LogWarning("FTSeg oldnetwork: " + oldnetwork.NetworkID.ToString() + " junction count: " + oldnetwork.TrackJunctions.Count.ToString() + " newnetwork ID: " + newnetwork.NetworkID.ToString() + " junction count: " + newnetwork.TrackJunctions.Count.ToString());
         for (int n = 0; n < oldnetwork.TrackJunctions.Count; n++)
         {
@@ -54,7 +56,10 @@ public class FreightTrackSegment
         newnetwork.ReassignTourCartStations(oldnetwork);
         oldnetwork.TrackJunctions.Clear();
         oldnetwork.TrackSegments.Clear();
-        FreightCartManager.instance.GlobalTrackNetworks.Remove(oldnetwork);
+        if (FreightCartManager.instance != null)
+            FreightCartManager.instance.GlobalTrackNetworks.Remove(oldnetwork);
+        else
+            Debug.LogWarning("FreightCartManager is null! Old network couldn't be registered anyway so no network to remove...");
         oldnetwork = null;
     }
 }

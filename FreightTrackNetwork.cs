@@ -10,14 +10,17 @@ public class FreightTrackNetwork
     public Dictionary<string, TourCartStation> TourCartStations = new Dictionary<string, TourCartStation>();
     public int NetworkID;
     public static int Networks = 0;
-    private bool ThreadSafety;
+    private object safety = new object();
 
     public FreightTrackNetwork(FreightTrackJunction junction)
     {
         this.NetworkID = Networks;
         Networks++;
         this.TrackJunctions.Add(junction);
-        FreightCartManager.instance.GlobalTrackNetworks.Add(this);
+        if (FreightCartManager.instance != null)
+            FreightCartManager.instance.GlobalTrackNetworks.Add(this);
+        else
+            Debug.LogWarning("Attempted to create FreightTrackNetwork before FRM was initialized.  Network won't be registered to the global list!");
     }
 
     public bool ContainsTrackSegment(FreightTrackSegment track)
@@ -102,43 +105,43 @@ public class FreightTrackNetwork
     public void NetworkIntegrityCheck(FreightTrackJunction junction1, FreightTrackJunction junction2, FreightTrackJunction junction3, FreightTrackJunction junction4)
     {
         //Flag when this network is compromised by threading
-        this.ThreadSafety = true;
-
-        //Map entire network of junctions from one and check if any other junctions exist in it
-        //Repeat with other networks that aren't found in the first
-        List<FreightTrackJunction> junctions1 = new List<FreightTrackJunction>();
-        List<FreightTrackJunction> junctions2 = new List<FreightTrackJunction>();
-        List<FreightTrackJunction> junctions3 = new List<FreightTrackJunction>();
-        List<FreightTrackJunction> junctions4 = new List<FreightTrackJunction>();
-
-        //If we have junction1 build it's network of junctions - we need at least one to compare to
-        if (junction1 != null)
+        lock (safety)
         {
-            junctions1 = this.JunctionNetMap(junction1);
-            this.ReconstructNetwork(junctions1);
-        }
+            //Map entire network of junctions from one and check if any other junctions exist in it
+            //Repeat with other networks that aren't found in the first
+            List<FreightTrackJunction> junctions1 = new List<FreightTrackJunction>();
+            List<FreightTrackJunction> junctions2 = new List<FreightTrackJunction>();
+            List<FreightTrackJunction> junctions3 = new List<FreightTrackJunction>();
+            List<FreightTrackJunction> junctions4 = new List<FreightTrackJunction>();
 
-        //Build net of junctions only if we're not already in the first junctions network
-        if (junction2 != null && !junctions1.Contains(junction2))
-        {
-            junctions2 = this.JunctionNetMap(junction2);
-            this.ReconstructNetwork(junctions2);
-        }
+            //If we have junction1 build it's network of junctions - we need at least one to compare to
+            if (junction1 != null)
+            {
+                junctions1 = this.JunctionNetMap(junction1);
+                this.ReconstructNetwork(junctions1);
+            }
 
-        //Check if junction 3 isn't in either 1 or 2
-        if (junction3 != null && (!junctions1.Contains(junction3) && !junctions2.Contains(junction3)))
-        {
-            junctions3 = this.JunctionNetMap(junction3);
-            this.ReconstructNetwork(junctions3);
-        }
+            //Build net of junctions only if we're not already in the first junctions network
+            if (junction2 != null && !junctions1.Contains(junction2))
+            {
+                junctions2 = this.JunctionNetMap(junction2);
+                this.ReconstructNetwork(junctions2);
+            }
 
-        //Check if 4 isn't a part of any of the previously constructed nets and build it if needed
-        if (junction4 != null && (!junctions1.Contains(junction4) && !junctions2.Contains(junction4) && !junctions3.Contains(junction4)))
-        {
-            junctions4 = this.JunctionNetMap(junction4);
-            this.ReconstructNetwork(junctions4);
+            //Check if junction 3 isn't in either 1 or 2
+            if (junction3 != null && (!junctions1.Contains(junction3) && !junctions2.Contains(junction3)))
+            {
+                junctions3 = this.JunctionNetMap(junction3);
+                this.ReconstructNetwork(junctions3);
+            }
+
+            //Check if 4 isn't a part of any of the previously constructed nets and build it if needed
+            if (junction4 != null && (!junctions1.Contains(junction4) && !junctions2.Contains(junction4) && !junctions3.Contains(junction4)))
+            {
+                junctions4 = this.JunctionNetMap(junction4);
+                this.ReconstructNetwork(junctions4);
+            }
         }
-        
     }
 
     /// <summary>
@@ -220,6 +223,11 @@ public class FreightTrackNetwork
             this.TrackJunctions[n].JunctionIndex = n;
     }
 
+    public FreightTrackJunction GetJunctionFromID(int junctionID)
+    {
+        return this.TrackJunctions.FirstOrDefault(x => x.JunctionID == junctionID);
+    }
+
     /// <summary>
     ///     Reassigns tour carts to new track network based on connected junctions
     /// </summary>
@@ -237,7 +245,7 @@ public class FreightTrackNetwork
             TourCartStation station = original.TourCartStations[keys[n]];
             if (station.ClosestJunction == null || station.TrackNetwork == null)
                 continue;
-            if (station.ClosestJunction.TrackNetwork == this && station.TrackNetwork.TourCartStations.ContainsKey(keys[n]))
+            if (station.ClosestJunction.TrackNetwork == this && station.TrackNetwork.TourCartStations.ContainsKey(keys[n]) && !this.TourCartStations.ContainsKey(keys[n]))
             {
                 station.TrackNetwork.TourCartStations.Remove(keys[n]);
                 this.TourCartStations.Add(keys[n], station);
@@ -257,130 +265,126 @@ public class FreightTrackNetwork
         if (start == null || destination == null || start == destination)
             return new Stack<FreightTrackJunction>();
 
-        //Always initialize false, if another thread reconstructs this network we'll know if it happened while processing route finding
         //Use a local copy of the junction list to avoid potential nasty consequences should the network change
-        this.ThreadSafety = false;
-        List<FreightTrackJunction> localjunctions = this.TrackJunctions;
-
         Stack<FreightTrackJunction> CartRoute = new Stack<FreightTrackJunction>();
-        if (!localjunctions.Contains(start) || !localjunctions.Contains(destination))
+        lock (safety)
         {
-            Debug.LogWarning("FreightTrackNetwork RouteFind attempted to rount to/from inaccessible junction\n start id " + start.JunctionID + " destination id " + destination.JunctionID + " trackjunctions count: " + localjunctions.Count);
-            return CartRoute;
-        }
-        int junctioncount = localjunctions.Count;
+            List<FreightTrackJunction> localjunctions = this.TrackJunctions;
 
-        //Initialize priority queue with only 0 distance for the start
-        SimplePriorityQueue<FreightTrackJunction> tentativedistances = new SimplePriorityQueue<FreightTrackJunction>();
-        for (int n = 0; n < junctioncount; n++)
-            tentativedistances.Enqueue(localjunctions[n], float.MaxValue);
-        tentativedistances.UpdatePriority(start, 0);
-
-        //Initialize a separate array of distances for pulling the tentative distances, initialize the start to 0
-        int[] distances = Enumerable.Repeat(int.MaxValue, junctioncount).ToArray();
-        int currentnode = start.JunctionIndex;
-        if (currentnode >= distances.Length)
-        {
-            Debug.LogWarning("FreightTrackNetwork RouteFind trying to navigate from junction outside of range");
-            this.ResetJunctionIndices();
-            return new Stack<FreightTrackJunction>();
-        }
-        distances[currentnode] = 0;
-
-        //Initialize an array for storing the parent junction for the path finding to later trace back to the beginning, indexed to JunctionIndex
-        //Start node previous is marked -1 to flag completion of the route trace
-        int[] previousnode = new int[junctioncount];
-        previousnode[currentnode] = -1;
-
-        //Initialize variables used in the core algorithm
-        int neighborindex;          //Index of neighbor junction as found in JunctionIndex
-        int initialdis;             //Distance to neighbor from start (tentative)
-        int currentdis;             //Distance to active junction
-        int tryroute;               //Distance to route to neighbor through active junction
-        FreightTrackJunction freightnode = tentativedistances.Dequeue();
-        FreightTrackJunction neighbor;
-        //Debug.LogWarning("FreightTrackNetwork RouteFind DEBUG - prior to loop");
-        for (int m = 0; m < junctioncount; m++)
-        { 
-            for (int n = 0; n < 4; n++)
+            if (!localjunctions.Contains(start) || !localjunctions.Contains(destination))
             {
-                neighbor = freightnode.ConnectedJunctions[n];
-
-                //Skip the neighbor if it is null or previously visited
-                if (neighbor == null || !tentativedistances.Contains(neighbor))
-                    continue;
-                neighborindex = neighbor.JunctionIndex;
-                if (neighborindex >= distances.Length || currentnode >= distances.Length)
-                {
-                    Debug.LogWarning("FreightTrackNetwork RouteFind checking neighbor junction outside of range");
-                    this.ResetJunctionIndices();
-                    return new Stack<FreightTrackJunction>();
-                }
-                initialdis = distances[neighborindex];
-                currentdis = distances[currentnode];
-                tryroute = currentdis + neighbor.SegmentDistances[n];
-                //If the newly calculated distance to the neighbor is shorter than the previous replace it and update pathing accordingly
-                if (tryroute < initialdis)
-                {
-                    distances[neighborindex] = tryroute;
-                    tentativedistances.UpdatePriority(neighbor, tryroute);
-                    previousnode[neighborindex] = currentnode;
-                }
-
+                Debug.LogWarning("FreightTrackNetwork RouteFind attempted to rount to/from inaccessible junction\n start id " + start.JunctionID + " destination id " + destination.JunctionID + " trackjunctions count: " + localjunctions.Count);
+                return CartRoute;
             }
-            //I feel like this check should come after dequeue... if the dequeue is the destination is there really any value in calculating for all its neighbors?
-            //GASP!  Wikipedia might be wrong!!?
-            if (!tentativedistances.Contains(destination))
-                break;
-            freightnode = tentativedistances.Dequeue();
-            currentnode = freightnode.JunctionIndex;
-        }
-        //Debug.LogWarning("FreightTrackNetwork RouteFind DEBUG - after loop");
-        if (freightnode != destination)
-        {
-            Debug.LogWarning("FreightTrackNetwork Route Find completed path finding with junction other than the destination?");
-            return new Stack<FreightTrackJunction>();
-        }
-        if (currentnode >= previousnode.Length)
-        {
-            Debug.LogWarning("FreightTrackNetwork RouteFind trying to trace back previousnode out of range");
-            this.ResetJunctionIndices();
-            return new Stack<FreightTrackJunction>();
-        }
-        //Push the destination onto the route stack and get the first previous junction
-        CartRoute.Push(freightnode);
-        int prevnode = previousnode[currentnode];
-        int safetycount = 0;
-        //Trace back to the start by each of the previous junctions anding with the starting junction
-        while (prevnode != -1)
-        {
-            freightnode = localjunctions[prevnode];
-            CartRoute.Push(freightnode);
-            prevnode = previousnode[prevnode];
-            if (prevnode >= previousnode.Length)
+            int junctioncount = localjunctions.Count;
+
+            //Initialize priority queue with only 0 distance for the start
+            SimplePriorityQueue<FreightTrackJunction> tentativedistances = new SimplePriorityQueue<FreightTrackJunction>();
+            for (int n = 0; n < junctioncount; n++)
+                tentativedistances.Enqueue(localjunctions[n], float.MaxValue);
+            tentativedistances.UpdatePriority(start, 0);
+
+            //Initialize a separate array of distances for pulling the tentative distances, initialize the start to 0
+            int[] distances = Enumerable.Repeat(int.MaxValue, junctioncount).ToArray();
+            int currentnode = start.JunctionIndex;
+            if (currentnode >= distances.Length)
             {
-                Debug.LogWarning("FreightTrackNetwork RouteFind trying to trace back previousnode out of range on path");
+                Debug.LogWarning("FreightTrackNetwork RouteFind trying to navigate from junction outside of range");
                 this.ResetJunctionIndices();
                 return new Stack<FreightTrackJunction>();
             }
-            safetycount++;
-            if (safetycount > 255)
+            distances[currentnode] = 0;
+
+            //Initialize an array for storing the parent junction for the path finding to later trace back to the beginning, indexed to JunctionIndex
+            //Start node previous is marked -1 to flag completion of the route trace
+            int[] previousnode = new int[junctioncount];
+            previousnode[currentnode] = -1;
+
+            //Initialize variables used in the core algorithm
+            int neighborindex;          //Index of neighbor junction as found in JunctionIndex
+            int initialdis;             //Distance to neighbor from start (tentative)
+            int currentdis;             //Distance to active junction
+            int tryroute;               //Distance to route to neighbor through active junction
+            FreightTrackJunction freightnode = tentativedistances.Dequeue();
+            FreightTrackJunction neighbor;
+            //Debug.LogWarning("FreightTrackNetwork RouteFind DEBUG - prior to loop");
+            for (int m = 0; m < junctioncount; m++)
             {
-                Debug.LogWarning("FreightTrackNetwork CartRoute failed construction or path has over 255 visited junctions!");
-                CartRoute = null;
+                for (int n = 0; n < 4; n++)
+                {
+                    neighbor = freightnode.ConnectedJunctions[n];
+
+                    //Skip the neighbor if it is null or previously visited
+                    if (neighbor == null || !tentativedistances.Contains(neighbor))
+                        continue;
+                    neighborindex = neighbor.JunctionIndex;
+                    if (neighborindex >= distances.Length || currentnode >= distances.Length)
+                    {
+                        Debug.LogWarning("FreightTrackNetwork RouteFind checking neighbor junction outside of range");
+                        this.ResetJunctionIndices();
+                        return new Stack<FreightTrackJunction>();
+                    }
+                    initialdis = distances[neighborindex];
+                    currentdis = distances[currentnode];
+                    tryroute = currentdis + neighbor.SegmentDistances[n];
+                    //If the newly calculated distance to the neighbor is shorter than the previous replace it and update pathing accordingly
+                    if (tryroute < initialdis)
+                    {
+                        distances[neighborindex] = tryroute;
+                        tentativedistances.UpdatePriority(neighbor, tryroute);
+                        previousnode[neighborindex] = currentnode;
+                    }
+
+                }
+                //I feel like this check should come after dequeue... if the dequeue is the destination is there really any value in calculating for all its neighbors?
+                //GASP!  Wikipedia might be wrong!!?
+                if (!tentativedistances.Contains(destination))
+                    break;
+                freightnode = tentativedistances.Dequeue();
+                currentnode = freightnode.JunctionIndex;
+            }
+            //Debug.LogWarning("FreightTrackNetwork RouteFind DEBUG - after loop");
+            if (freightnode != destination)
+            {
+                Debug.LogWarning("FreightTrackNetwork RouteFind completed path finding with junction other than the destination?");
                 return new Stack<FreightTrackJunction>();
             }
-        }
-        //The above loop automatically pushes the start junction and since the cart is assumed to be there we'll just toss it out as part of a sanity check
-        if (CartRoute.Pop() != start)
-        {
-            Debug.LogWarning("FreightTrackNetwork RouteFind returned a path that didn't start with original start junction!");
-            return new Stack<FreightTrackJunction>();
-        }
-        if (this.ThreadSafety)
-        {
-            Debug.LogWarning("FreightTrackNetwork RouteFind was in process when the track network changed!");
-            return new Stack<FreightTrackJunction>();
+            if (currentnode >= previousnode.Length)
+            {
+                Debug.LogWarning("FreightTrackNetwork RouteFind trying to trace back previousnode out of range");
+                this.ResetJunctionIndices();
+                return new Stack<FreightTrackJunction>();
+            }
+            //Push the destination onto the route stack and get the first previous junction
+            CartRoute.Push(freightnode);
+            int prevnode = previousnode[currentnode];
+            int safetycount = 0;
+            //Trace back to the start by each of the previous junctions anding with the starting junction
+            while (prevnode != -1)
+            {
+                freightnode = localjunctions[prevnode];
+                CartRoute.Push(freightnode);
+                prevnode = previousnode[prevnode];
+                if (prevnode >= previousnode.Length)
+                {
+                    Debug.LogWarning("FreightTrackNetwork RouteFind trying to trace back previousnode out of range on path");
+                    this.ResetJunctionIndices();
+                    return new Stack<FreightTrackJunction>();
+                }
+                safetycount++;
+                if (safetycount > 255)
+                {
+                    Debug.LogWarning("FreightTrackNetwork RouteFind failed construction or path has over 255 visited junctions!");
+                    CartRoute = null;
+                    return new Stack<FreightTrackJunction>();
+                }
+            }
+            //The above loop automatically pushes the start junction and since the cart is assumed to be there we'll just toss it out as part of a sanity check
+            if (CartRoute.Pop() != start)
+            {
+                Debug.LogWarning("FreightTrackNetwork RouteFind returned a path that didn't start with original start junction!");
+                return new Stack<FreightTrackJunction>();
+            }
         }
         return CartRoute;
     }

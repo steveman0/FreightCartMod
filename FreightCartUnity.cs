@@ -107,13 +107,16 @@ public class FreightCartUnity : MonoBehaviour
             this.Door_R.GetComponent<Renderer>().material = material;
             this.Body.GetComponent<Renderer>().material = material;
         }
+
         this.mCurrentPos = this.transform.position;
         this.mMPB = new MaterialPropertyBlock();
+        if (this.mHoverLight != null && this.mob.IsOreFreighter)
+            this.mMPB.SetColor("_GlowColor", Color.blue);
     }
 
     private void UpdateAudio()
     {
-        Profiler.BeginSample("UpdateAudio");
+        //Profiler.BeginSample("UpdateAudio");
         if ((double)this.mob.mDistanceToPlayer > 12.0)
         {
             if (this.mAudio.isPlaying)
@@ -135,7 +138,7 @@ public class FreightCartUnity : MonoBehaviour
             this.mAudio.pitch += (float)(((double)(this.mrCurrentMobSpeed * 1f) - (double)this.mAudio.pitch) * (double)Time.deltaTime / 1.0);
             this.mAudio.priority = 64 + (int)this.mob.mDistanceToPlayer * 4;
         }
-        Profiler.EndSample();
+        //Profiler.EndSample();
     }
 
     private void Update()
@@ -155,7 +158,7 @@ public class FreightCartUnity : MonoBehaviour
         }
         else
         {
-            Profiler.BeginSample("Minecart Update");
+            //Profiler.BeginSample("Minecart Update");
             ++this.mnUpdates;
             if (this.mnUpdates % 60 != 0)
                 ;
@@ -171,7 +174,7 @@ public class FreightCartUnity : MonoBehaviour
                 AudioSoundEffectManager.instance.DoSplatImpact(this.transform.position, 1f);
             }
             this.UpdateAudio();
-            Profiler.BeginSample("Particles");
+            //Profiler.BeginSample("Particles");
             if ((double)this.mob.mDistanceToPlayer < 32.0)
             {
                 if (this.mob.meLoadState == FreightCartMob.eLoadState.eLoading)
@@ -197,8 +200,8 @@ public class FreightCartUnity : MonoBehaviour
             }
             this.mob.mrVisualLoadTimer -= Time.deltaTime;
             this.mrPosUpdateTimer += Time.deltaTime;
-            Profiler.EndSample();
-            Profiler.BeginSample("UpdateDoors");
+            //Profiler.EndSample();
+            //Profiler.BeginSample("UpdateDoors");
             if ((double)this.mob.mDistanceToPlayer < 16.0)
             {
                 if (this.mob.meLoadState == FreightCartMob.eLoadState.eLoading)
@@ -215,9 +218,9 @@ public class FreightCartUnity : MonoBehaviour
                     this.Door_R.transform.localRotation = Quaternion.Euler(0.0f, 360f - this.mrDoorAngle, 180f);
                 }
             }
-            Profiler.EndSample();
+            //Profiler.EndSample();
             this.mrCurrentMobPosUpdateDelay -= Time.deltaTime;
-            Profiler.BeginSample("DequeuePath");
+            //Profiler.BeginSample("DequeuePath");
             Debug.DrawRay(this.mCurrentMobPos, this.mLook * 5f, Color.magenta, 1f);
             Vector8 vector8;
             if (this.mob.maCartPositions.Count > 0 && (double)this.mrCurrentMobPosUpdateDelay < 0.0 && this.mob.maCartPositions.TryDequeue(out vector8))
@@ -243,11 +246,11 @@ public class FreightCartUnity : MonoBehaviour
                 if (this.mob.maCartPositions.Count != 0)
                     ;
             }
-            Profiler.EndSample();
+            //Profiler.EndSample();
             Vector3 vector3_1 = this.mCurrentMobPos;
             if ((double)this.mLook.y > 0.0)
                 vector3_1.y += this.mLook.y;
-            Profiler.BeginSample("UpdatePosition");
+            //Profiler.BeginSample("UpdatePosition");
             if (this.mPreviousMCPosition != vector3_1)
             {
                 this.mrPosUpdateTimer = 0.0f;
@@ -294,7 +297,7 @@ public class FreightCartUnity : MonoBehaviour
             }
             else if ((double)this.mrTimeUntilNextVisualPositionUpdate <= 0.0)
                 this.transform.position = (this.mCurrentPos + this.transform.position) / 2f;
-            Profiler.EndSample();
+            //Profiler.EndSample();
             if ((double)this.mrTimeUntilNextVisualPositionUpdate <= 0.0)
             {
                 float num1 = this.mob.mDistanceToPlayer - 10f;
@@ -306,13 +309,13 @@ public class FreightCartUnity : MonoBehaviour
                 this.mrTimeUntilNextVisualPositionUpdate += num2;
             }
             this.ConfigLOD();
-            Profiler.EndSample();
+            //Profiler.EndSample();
         }
     }
 
     private void ConfigLOD()
     {
-        Profiler.BeginSample("Minecart LOD");
+        //Profiler.BeginSample("Minecart LOD");
         bool flag1 = true;
         if (this.mob.mSegment.mbOutOfView)
             flag1 = false;
@@ -390,10 +393,10 @@ public class FreightCartUnity : MonoBehaviour
         }
         else
         {
-            Profiler.BeginSample("No Render");
+            //Profiler.BeginSample("No Render");
             this.mHoverLight.enabled = false;
-            Profiler.EndSample();
+            //Profiler.EndSample();
         }
-        Profiler.EndSample();
+        //Profiler.EndSample();
     }
 }

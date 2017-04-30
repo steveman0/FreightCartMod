@@ -10,7 +10,7 @@ public class FreightCartMob : MobEntity
     public int mnMaxStorage = 25;
     private float mrSpeedScalar = 1f;
     public float mrSpeed = 1f;
-    public List<CubeCoord> mVisitedLocations = new List<CubeCoord>();
+    //public List<CubeCoord> mVisitedLocations = new List<CubeCoord>();
     private float mrTargetSpeed;
     public int mnUsedStorage;
     //private ItemBase[] maStoredItems;
@@ -24,6 +24,7 @@ public class FreightCartMob : MobEntity
     private static int MineCartID;
     public float mrVisualLoadTimer;
     public ConcurrentQueue<Vector8> maCartPositions;
+    private int SlopeCatch = -1;   //Adding this to try to catch odd derailing carts
 
     private float lrTimer;
     private int mnUpdatesPerTick;
@@ -33,10 +34,17 @@ public class FreightCartMob : MobEntity
     private float mrSpeedBoost;
     private Segment mUnderSegment;
     private Segment mPrevGetSeg;
+    private bool SlowTrack;
 
     public static ushort FreightStationType = ModManager.mModMappings.CubesByKey["steveman0.FreightCartStation"].CubeType;
     public static ushort TourStationType = ModManager.mModMappings.CubesByKey["steveman0.TourCartStation"].CubeType;
     public static ushort JunctionType = ModManager.mModMappings.CubesByKey["steveman0.TrackJunction"].CubeType;
+    public static ushort JunctionVal = ModManager.mModMappings.CubesByKey["steveman0.TrackJunction"].ValuesByKey["steveman0.TrackJunctionStandard"].Value;
+    public static ushort ScrapJunctionVal = ModManager.mModMappings.CubesByKey["steveman0.TrackJunction"].ValuesByKey["steveman0.ScrapTrackJunction"].Value;
+    public static ushort ScrapTrackType = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].CubeType;
+    public static ushort ScrapStraightVal = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].ValuesByKey["steveman0.ScrapTrackStraight"].Value;
+    public static ushort ScrapCornerVal = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].ValuesByKey["steveman0.ScrapTrackCorner"].Value;
+    public static ushort ScrapSlopeVal = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].ValuesByKey["steveman0.ScrapTrackSlope"].Value;
     public static ushort FreightStationValue = 0;
     public Dictionary<string, MachineInventory> LocalInventory = new Dictionary<string, MachineInventory>();
     public MachineInventory TransferInventory;
@@ -48,9 +56,11 @@ public class FreightCartMob : MobEntity
     public bool EmptyEscape = false;
     public bool CartCheckin = false;
     private bool CartLoadIn = false;
+    public bool CartQueuelock = false;
     private bool TransitCheckIn = true;
     public bool OffloadingExcess = true;
     private List<ItemBase> CheckInList = new List<ItemBase>();
+    public ItemBase OreFreighterItem;
 
     public FreightTrackJunction LastJunction;
     public FreightTrackJunction NextJunction;
@@ -58,6 +68,8 @@ public class FreightCartMob : MobEntity
     public Stack<FreightTrackJunction> JunctionRoute = new Stack<FreightTrackJunction>();
     public int DestinationDirection = -1;
     public FreightCartStation AssignedStation;
+
+    public static bool ReadNullDebug = false;
 
     public FreightCartMob(FreightCartMob.eMinecartType leType, ModCreateMobParameters modmobtype)
     : base(modmobtype, SpawnableObjectEnum.Minecart_T3)
@@ -84,13 +96,13 @@ public class FreightCartMob : MobEntity
 
     public override void SpawnGameObject()
     {
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T1)
+        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T1 || this.meType == eMinecartType.OreFreighter_T1)
             this.mObjectType = SpawnableObjectEnum.Minecart_T1;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T2)
+        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T2 || this.meType == eMinecartType.OreFreighter_T2)
             this.mObjectType = SpawnableObjectEnum.Minecart_T2;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T3)
+        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T3 || this.meType == eMinecartType.OreFreighter_T3)
             this.mObjectType = SpawnableObjectEnum.Minecart_T3;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T4)
+        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T4 || this.meType == eMinecartType.OreFreighter_T4)
             this.mObjectType = SpawnableObjectEnum.Minecart_T4;
         if (this.meType == FreightCartMob.eMinecartType.FreightCartTour || this.meType == eMinecartType.FreightCartTourBasic)
             this.mObjectType = SpawnableObjectEnum.Minecart_T10;
@@ -99,40 +111,35 @@ public class FreightCartMob : MobEntity
             this.mObjectType = SpawnableObjectEnum.Minecart_T4;
 
         base.SpawnGameObject();
-        if (this.mWrapper.mGameObjectList == null)
+        if (this.mWrapper.mGameObjectList == null && !CartQueuelock)
         {
-            this.mWrapper.mGameObjectList = new List<GameObject>();
+            //this.mWrapper.mGameObjectList = new List<GameObject>();
             ManagerSync.CartLoader.Enqueue(this);
+            this.CartQueuelock = true; // Prevent requeueing for another script if the manager gets bogged down by many cart requests
             if (!this.CartLoadIn)
                 this.CartLoadIn = true;
             else
                 ManagerSync.instance.CartCounter--;
         }
-
-
-        //if (this.mWrapper != null && this.mWrapper.mGameObjectList.Count != 0)
-        //{
-        //    Component[] obj = this.mWrapper.mGameObjectList[0].gameObject.GetComponentsInChildren(typeof(Component));
-        //    foreach (Component x in obj)
-        //    {
-        //        //Debug.Log("mWrapper Object: " + x + " name: " + x.name);
-        //        if (x.name == "Minecart_Unity")
-        //            x.gameObject.SetActive(false);
-        //    }
-        //    Debug.Log("Adding script object?");
-        //    this.mWrapper.mGameObjectList[0].AddComponent<FreightCartUnity>();
-        //    this.mWrapper.mGameObjectList[0].gameObject.SetActive(true);
-        //}
-
-        //foreach (GameObject x in this.mWrapper.mGameObjectList)
-        //{
-        //    Debug.Log("GameObject in wrapper: " + x.ToString());
-        //}
-        //Debug.Log("Wrapper: " + this.mWrapper.ToString());
     }
 
     private void SetStatsFromType()
     {
+        if (this.meType == FreightCartMob.eMinecartType.ScrapCartMK1)
+        {
+            this.mrSpeedScalar = 0.5f;
+            this.mnMaxStorage = 5;
+            this.IsScrapCart = true;
+            this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
+        }
+        if (this.meType == eMinecartType.ScrapOreFreighterMK1)
+        {
+            this.mrSpeedScalar = 0.5f;
+            this.mnMaxStorage = 50;
+            this.IsScrapCart = true;
+            this.IsOreFreighter = true;
+            this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
+        }
         if (this.meType == FreightCartMob.eMinecartType.FreightCart_T1)
         {
             this.mrSpeedScalar = 1f;
@@ -176,31 +183,44 @@ public class FreightCartMob : MobEntity
             this.mnMaxStorage = 0;
             this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
         }
+        if (this.meType == FreightCartMob.eMinecartType.OreFreighter_T1)
+        {
+            this.mrSpeedScalar = 1f;
+            this.mnMaxStorage = 250;
+            this.IsOreFreighter = true;
+            this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
+        }
+        if (this.meType == FreightCartMob.eMinecartType.OreFreighter_T2)
+        {
+            this.mrSpeedScalar = 2f;
+            this.mnMaxStorage = 250;
+            this.IsOreFreighter = true;
+            this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
+        }
+        if (this.meType == FreightCartMob.eMinecartType.OreFreighter_T3)
+        {
+            this.mrSpeedScalar = 1f;
+            this.mnMaxStorage = 500;
+            this.IsOreFreighter = true;
+            this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
+        }
+        if (this.meType == FreightCartMob.eMinecartType.OreFreighter_T4)
+        {
+            this.mrSpeedScalar = 2f;
+            this.mnMaxStorage = 500;
+            this.IsOreFreighter = true;
+            this.TransferInventory = new MachineInventory(this, this.mnMaxStorage);
+        }
+    }
 
-        //if (this.meType == FreightCartMob.eMinecartType.Basic)
-        //{
-        //    this.mrSpeedScalar = 1f;
-        //    this.mnMaxStorage = 25;
-        //}
-        //if (this.meType == FreightCartMob.eMinecartType.Fast)
-        //{
-        //    this.mrSpeedScalar = 2f;
-        //    this.mnMaxStorage = 25;
-        //}
-        //if (this.meType == FreightCartMob.eMinecartType.Large)
-        //{
-        //    this.mrSpeedScalar = 1f;
-        //    this.mnMaxStorage = 50;
-        //}
-        //if (this.meType == FreightCartMob.eMinecartType.Bulk)
-        //{
-        //    this.mrSpeedScalar = 2f;
-        //    this.mnMaxStorage = 50;
-        //}
-        //if (this.meType != FreightCartMob.eMinecartType.Tour)
-        //    return;
-        //this.mrSpeedScalar = 4f;
-        //this.mnMaxStorage = 0;
+    public bool IsOreFreighter
+    {
+        get; private set;
+    }
+
+    public bool IsScrapCart
+    {
+        get; private set;
     }
 
     private void ConfigSpeedTicks()
@@ -229,10 +249,17 @@ public class FreightCartMob : MobEntity
 
         this.TransitCheck();
 
+        //if (this.AssignedStation == null)
+        //{
+
+        //}
+
         if (this.mnUsedStorage < 0)
             this.RecountInventory();
 
         ++this.mnUpdates;
+        if (this.SlopeCatch - this.mnUpdates > 5)
+            this.SlopeCatch = -1;
         this.UpdatePlayerDistanceInfo();
         this.lrTimer -= MobUpdateThread.mrPreviousUpdateTimeStep;
         if (this.mLook.y > 0.0)
@@ -250,6 +277,17 @@ public class FreightCartMob : MobEntity
         {
             this.mrSpeed += MobUpdateThread.mrPreviousUpdateTimeStep * (1.5f * this.mrSpeedScalar);
             this.ConfigSpeedTicks();
+        }
+        if (this.SlowTrack && !this.IsScrapCart) // Slow down regular carts on scrap track
+        {
+            float speedfactor = 0.4f * this.mrSpeedScalar;
+            if (this.mrSpeed > (double)speedfactor)
+            {
+                this.mrSpeed *= 0.4f;
+                if (this.mrSpeed < (double)speedfactor)
+                    this.mrSpeed = speedfactor;
+                this.ConfigSpeedTicks();
+            }
         }
         this.UpdateLoadStatus();
         float num1 = this.mrTargetSpeed * (1f + this.mrSpeedBoost);
@@ -275,21 +313,42 @@ public class FreightCartMob : MobEntity
         if (!this.TransitCheckIn)
         {
             bool checkreg = true;
+            if (this.LocalInventory == null)
+            {
+                Debug.LogWarning("FreightCartMob is trying to do transit check prior to having an inventory!");
+                return;
+            }
             List<string> keys = this.LocalInventory.Keys.ToList();
             int count = keys.Count;
             for (int m = 0; m < count; m++)
             {
                 string networkid = keys[m];
-                int count2 = this.LocalInventory[networkid].Inventory.Count;
-                for (int n = 0; n < count2; n++)
+                if (string.IsNullOrEmpty(networkid) || this.LocalInventory[networkid] == null || this.LocalInventory[networkid].Inventory == null)
                 {
-                    ItemBase item = this.LocalInventory[networkid].Inventory[n];
-                    checkreg = FreightCartManager.instance.NetworkAdd(networkid, item, item.GetAmount());
-                    if (!checkreg)
+                    Debug.LogWarning("FreightCartMob TransitCheck found null network or inventory!  Networking failure?");
+                    return;
+                }
+                MachineInventory checkinv;
+                if (this.LocalInventory.TryGetValue(networkid, out checkinv))
+                {
+                    int count2 = checkinv.Inventory.Count;
+                    for (int n = 0; n < count2; n++)
                     {
-                        if (n == 0)
+                        ItemBase item = checkinv.Inventory[n];
+                        if (item == null)
+                        {
+                            Debug.LogWarning("FreightCartMob Transit Check got a null item.  Suspect data corruption!");
+                            continue;
+                        }
+                        if (FreightCartManager.instance == null)
                             return;
-                        continue;
+                        checkreg = FreightCartManager.instance.NetworkAdd(networkid, item, item.GetAmount());
+                        if (!checkreg)
+                        {
+                            if (n == 0)
+                                return;
+                            continue;
+                        }
                     }
                 }
             }
@@ -305,10 +364,18 @@ public class FreightCartMob : MobEntity
             Debug.LogError((object)"Error, our station went null!");
             this.LeaveStation();
         }
+        // Scrap carts only check load/unload once a second-ish effectively slowing their throughput at a station to 60 items/min.
+        if (this.IsScrapCart && this.mnUpdates % 5 > 0)
+            return;
         if (this.meLoadState == FreightCartMob.eLoadState.eUnloading)
             this.UpdateCartUnload();
         if (this.meLoadState == FreightCartMob.eLoadState.eLoading)
             this.UpdateCartLoad();
+    }
+
+    private bool HasAttachedConsumer()
+    {
+        return (this.FCStation.ConnectedInventory != null || this.FCStation.AttachedInterface != null || this.FCStation.HopperInterface != null);
     }
 
     private void UpdateCartUnload()
@@ -320,7 +387,7 @@ public class FreightCartMob : MobEntity
         else
         {
             this.mBlockOffset = Vector3.zero;
-            if ((int)this.FCStation.mValue != FreightStationValue)
+            if (this.FCStation.mValue != FreightStationValue)
                 Debug.LogError(("Attempted to unload into the wrong type of station! (Expected Freight station val, got " + this.FCStation.mValue));
             //if (!this.FCStation.mbWaitForFullLoad && this.mrLoadTimer > 300.0)
             //    this.LeaveStation();
@@ -337,8 +404,7 @@ public class FreightCartMob : MobEntity
                 //Get the network stock to compare and adjust accordingly to unloading etc.
                 //if (this.CurrentNetworkStock == null)
                 //    this.CurrentNetworkStock = FreightCartManager.instance.GetNetworkStock(this.FCStation);
-
-                if (this.FCStation.ConnectedInventory != null && this.TransferInventory.ItemCount() == 0 && this.LocalInventory.ContainsKey(this.NetworkID) && this.LocalInventory[this.NetworkID].ItemCount() != 0)
+                if (HasAttachedConsumer() && this.TransferInventory.ItemCount() == 0 && this.LocalInventory.ContainsKey(this.NetworkID) && this.LocalInventory[this.NetworkID].ItemCount() != 0)
                 {
                     List<KeyValuePair<ItemBase, int>> needs = FreightCartManager.instance.GetStationNeeds(this.FCStation);
                     for (int index = 0; index < needs.Count; index++)
@@ -348,10 +414,10 @@ public class FreightCartMob : MobEntity
                     }
 
                     //Check for all items that aren't needed by the network and transfer them if applicable
-                    if (this.OffloadingExcess)
+                    if (this.OffloadingExcess && this.FCStation.massStorageCrate != null)
                         this.RetrieveExcess();
                 }
-                if (this.TransferInventory.ItemCount() > 0 && this.FCStation.ConnectedInventory != null)
+                if (this.TransferInventory.ItemCount() > 0 && HasAttachedConsumer() && !(this.FCStation.HopperInterface != null && this.FCStation.HopperInterface.Machine.IsFull()))
                 {
                     ItemBase deposited = this.TransferInventory.RemoveAnySingle(1);
                     int remainder = this.FCStation.DepositItem(deposited);
@@ -359,10 +425,20 @@ public class FreightCartMob : MobEntity
                     {
                         FreightCartManager.instance.NetworkRemove(this.NetworkID, deposited, 1);
                         this.mnUsedStorage--;
+                        this.mrVisualLoadTimer = 1f;
+                        if (this.mnUsedStorage == 0 && this.OreFreighterItem != null)
+                            this.OreFreighterItem = null;
                     }
                     else
                     {
-                        Debug.LogWarning("Station failed to deposit item at FreightCart unload step. Returning to local inventory.");
+                        if (deposited != null && this.FCStation.ConnectedInventory != null)
+                        {
+                            Debug.LogWarning("Station named " + (!String.IsNullOrEmpty(this.FCStation.StationName) ? this.FCStation.StationName : "UNNAMED") + " failed to deposit item " + deposited.ToString() + " into inventory " + (!String.IsNullOrEmpty(this.FCStation.ConnectedInventory.Name) ? this.FCStation.ConnectedInventory.Name : "UNNAMED") + " at FreightCart unload step. Returning to local inventory.");
+                        }
+                        else if (this.FCStation.HopperInterface != null)
+                            Debug.Log("FreightCart attempted to deposit item at FreightInterface but interface was full?  We already check for this!");
+                        else
+                            Debug.LogWarning("FreightCartMob failed to deposit item to freight interface most likely!");
                         if (!string.IsNullOrEmpty(this.NetworkID) && this.LocalInventory.ContainsKey(this.NetworkID))
                             this.LocalInventory[this.NetworkID].AddItem(deposited.SetAmount(remainder));
                         else
@@ -376,10 +452,8 @@ public class FreightCartMob : MobEntity
                                 Debug.LogWarning("NetworkID is null so we can't restore the item! Initialization error?");
                         }
                     }
-                    //this.CurrentNetworkStock.Inventory[deposited]--;
-                    this.mrVisualLoadTimer = 1f;
                 }
-                else if (this.TransferInventory.ItemCount() > 0)
+                else if (this.TransferInventory.ItemCount() > 0 && !(this.FCStation.HopperInterface != null && this.FCStation.HopperInterface.Machine.IsFull()))
                 {
                     Debug.LogWarning("Freight cart still had items to transfer but lost mass storage! Remaining items: " + this.TransferInventory.ItemCount());
                 }
@@ -418,11 +492,9 @@ public class FreightCartMob : MobEntity
                 //    this.CurrentNetworkStock = FreightCartManager.instance.GetNetworkStock(this.FCStation);
                 this.FCStation.mrCartOnUs = 1f;
                 //this.FCStation.mrLastCartLeavTimer = this.mrLoadTimer;
-                if (this.FCStation.ConnectedInventory != null && this.StationOfferings == null)
+                if (HasAttachedConsumer() && this.StationOfferings == null)
                 {
                     this.StationOfferings = FreightCartManager.instance.GetStationOfferings(this.FCStation);
-                    if (this.StationOfferings == null)
-                        Debug.LogWarning("Tried to get station offerings but they were null?");
                 }
                 if (this.StationOfferings != null && this.StationOfferings.Count > 0)
                 {
@@ -441,6 +513,8 @@ public class FreightCartMob : MobEntity
                                 //this.CurrentNetworkStock.Inventory[item]++;
                                 FreightCartManager.instance.NetworkAdd(this.NetworkID, item, 1);
                                 this.mnUsedStorage++;
+                                if (this.IsOreFreighter)
+                                    this.OreFreighterItem = item;
                                 this.mrVisualLoadTimer = 1f;
                                 this.MarkDirtyDelayed();
                             }
@@ -503,7 +577,8 @@ public class FreightCartMob : MobEntity
         //Start on a random item to help balance input
         int getitem = this.rand.Next(0, this.StationOfferings.Count);
         ItemBase item = this.StationOfferings[getitem].Key;
-        if (FreightCartManager.instance.NetworkNeeds(this.NetworkID, item) > 0)
+
+        if (FreightCartManager.instance.NetworkNeeds(this.NetworkID, item) > 0 && this.FreighterAccepted(item))
         {
             return item.NewInstance().SetAmount(1);
         }
@@ -516,12 +591,25 @@ public class FreightCartMob : MobEntity
                 if (index >= this.StationOfferings.Count)
                     check -= this.StationOfferings.Count;
                 item = this.StationOfferings[check].Key;
+                if (!this.FreighterAccepted(item))
+                    continue;
                 if (FreightCartManager.instance.NetworkNeeds(this.NetworkID, item) > 0)
                     return item.NewInstance().SetAmount(1);
             }
         }
         this.FullEscape = true;
         return null;
+    }
+
+    private bool FreighterAccepted(ItemBase item)
+    {
+        if (!this.IsOreFreighter)
+            return true;
+        else if (this.OreFreighterItem != null && item.Compare(this.OreFreighterItem))
+            return true;
+        else if (this.OreFreighterItem == null && item.mType == ItemType.ItemCubeStack && CubeHelper.IsOre((item as ItemCubeStack).mCubeType))
+            return true;
+        return false;
     }
 
     private void RetrieveItem(KeyValuePair<ItemBase, int> keypair)
@@ -532,27 +620,49 @@ public class FreightCartMob : MobEntity
         if (this.LocalInventory.ContainsKey(this.NetworkID))
         {
             if (this.LocalInventory[this.NetworkID].IsEmpty())
+            {
                 Debug.LogError("Error, can't retrieve item from Minecart as it's empty.");
+                this.LocalInventory.Remove(this.NetworkID);
+            }
             this.LocalInventory[this.NetworkID].RemoveWhiteList(ref this.TransferInventory.Inventory, item, this.TransferInventory.StorageCapacity, amount);
             if (this.LocalInventory[this.NetworkID].IsEmpty())
+            {
                 this.LocalInventory.Remove(this.NetworkID);
+                if (this.IsOreFreighter && this.mnUsedStorage <= 0)
+                    this.OreFreighterItem = null;
+            }
         }
     }
 
     private void RetrieveExcess()
     {
+        int count = 0;
+        ItemBase item = null;
         if (this.LocalInventory.ContainsKey(this.NetworkID))
         {
+            count = this.LocalInventory[this.NetworkID].ItemCount();
             for (int n = 0; n < this.LocalInventory[this.NetworkID].Inventory.Count; n++)
             {
-                ItemBase item = this.LocalInventory[this.NetworkID].Inventory[n];
-                if (FreightCartManager.instance.NetworkNeeds(this.NetworkID, item) <= 0)
+                ItemBase item2 = this.LocalInventory[this.NetworkID].Inventory[n];
+                if (FreightCartManager.instance.RegistryDeficit(this.NetworkID, item) == 0)
                 {
                     List<FreightRegistry> reg = FreightCartManager.instance.GetFreightEntries(this.NetworkID, this.FCStation.massStorageCrate);
                     if (reg.Exists(x => x.FreightItem.Compare(item)))
+                    {
+                        item = item2;
                         this.LocalInventory[this.NetworkID].RemoveWhiteList(ref this.TransferInventory.Inventory, item, this.TransferInventory.StorageCapacity, item.GetAmount());
+                        if (this.LocalInventory[this.NetworkID].IsEmpty())
+                        {
+                            this.LocalInventory.Remove(this.NetworkID);
+                            break;
+                        }
+                    }
                 }
             }
+            //if (this.LocalInventory.ContainsKey(this.NetworkID))
+            //    Debug.LogWarning("FreightCartMob offloaded " + (count - this.LocalInventory[this.NetworkID].ItemCount()).ToString() + " items as excess to " + (string.IsNullOrEmpty(this.FCStation.StationName) ? "UNAMED" : this.FCStation.StationName) + " freight cart station from network: " + this.NetworkID + ".  Last item was: " + (item != null ? (item.ToString() + " and deficit: " + FreightCartManager.instance.NetworkNeeds(this.NetworkID, item)) : ""));
+            //else
+            //    Debug.LogWarning("FreightCartMob offloaded " + count + " items as excess to " + (string.IsNullOrEmpty(this.FCStation.StationName) ? "UNAMED" : this.FCStation.StationName) + " freight cart station" + " freight cart station from network: " + this.NetworkID + ".  Last item was: " + (item != null ? (item.ToString() + " and deficit: " + FreightCartManager.instance.NetworkNeeds(this.NetworkID, item)) : ""));
         }
         this.OffloadingExcess = false;
     }
@@ -707,7 +817,7 @@ public class FreightCartMob : MobEntity
                 type = cube;
                 lFlags1 = lFlags2;
                 lValue1 = lValue2;
-                if (type == 538 && lValue1 == 2)
+                if ((type == 538 && lValue1 == 2) || (type == ScrapTrackType && lValue1 == ScrapSlopeVal))
                 {
                     flag = true;
                 }
@@ -724,8 +834,9 @@ public class FreightCartMob : MobEntity
                     Debug.LogWarning(("FreightCart hit air but located no underslope!" + TerrainData.GetNameForValue(type, lValue1)));
                 }
             }
-            if (type == 538)
+            if (type == 538 || type == ScrapTrackType)
             {
+                this.SlowTrack = type == 538 ? false : true;
                 if (this.meLoadState == FreightCartMob.eLoadState.eLoading || this.meLoadState == FreightCartMob.eLoadState.eUnloading || this.meLoadState == FreightCartMob.eLoadState.eCharging)
                     this.LeaveStation();
                 this.meLoadState = FreightCartMob.eLoadState.eTravelling;
@@ -734,13 +845,13 @@ public class FreightCartMob : MobEntity
                 vector3_1.x = vector3_1.x >= -0.5 ? (vector3_1.x <= 0.5 ? 0.0f : 1f) : -1f;
                 vector3_1.y = vector3_1.y >= -0.5 ? (vector3_1.y <= 0.5 ? 0.0f : 1f) : -1f;
                 vector3_1.z = vector3_1.z >= -0.5 ? (vector3_1.z <= 0.5 ? 0.0f : 1f) : -1f;
-                if (lValue1 == 3)
+                if (type == 538 && lValue1 == 3)
                 {
                     this.mLook = -this.mLook;
                 }
                 else
                 {
-                    if (lValue1 == 4)
+                    if (type == 538 && lValue1 == 4)
                     {
                         this.mLook.y = 0.0f;
                         this.mLook.Normalize();
@@ -757,7 +868,7 @@ public class FreightCartMob : MobEntity
                             return;
                         }
                     }
-                    if (lValue1 == 5)
+                    if (type == 538 && lValue1 == 5)
                     {
                         this.mLook.y = 0.0f;
                         this.mLook.Normalize();
@@ -774,7 +885,7 @@ public class FreightCartMob : MobEntity
                             return;
                         }
                     }
-                    if (lValue1 == 0)
+                    if ((type == 538 && lValue1 == 0) || (type == ScrapTrackType && lValue1 == ScrapStraightVal))
                     {
                         this.mLook.y = 0.0f;
                         this.mLook.Normalize();
@@ -783,7 +894,7 @@ public class FreightCartMob : MobEntity
                         else if (!(this.mLook == vector3_1) && !(this.mLook == -vector3_1))
                             this.mLook = vector3_1;
                     }
-                    if (lValue1 == 1)
+                    if ((type == 538 && lValue1 == 1) || (type == ScrapTrackType && lValue1 == ScrapCornerVal))
                     {
                         this.mLook.y = 0.0f;
                         this.mLook.Normalize();
@@ -794,7 +905,7 @@ public class FreightCartMob : MobEntity
                         else
                             this.RemoveCart("Minecart headed into invalid corner");
                     }
-                    if (lValue1 != 2)
+                    if ((type == 538 && lValue1 != 2) || (type == ScrapTrackType && lValue1 != ScrapSlopeVal))
                         return;
                     Vector3 vector3_2 = vector3_1;
                     this.mLook.y = 0.0f;
@@ -821,7 +932,7 @@ public class FreightCartMob : MobEntity
                     else
                         Debug.LogWarning(string.Concat(new object[4]
                         {
-               "Minecart hit the side of a slope (Look was",
+               "Freightcart hit the side of a slope (Look was",
                this.mLook,
                " but track was ",
                vector3_1
@@ -830,6 +941,7 @@ public class FreightCartMob : MobEntity
             }
             else if (type == 539)
             {
+                this.SlowTrack = false;
                 Vector3 vector3 = SegmentCustomRenderer.GetRotationQuaternion(lFlags1) * Vector3.forward;
                 if (this.mLook == vector3 || this.mLook == -vector3)
                 {
@@ -874,6 +986,7 @@ public class FreightCartMob : MobEntity
             }//Inserted my Freight Cart Station type!
             else if (type == FreightStationType)
             {
+                this.SlowTrack = false;
                 this.FullEscape = false;
                 Vector3 vector3 = SegmentCustomRenderer.GetRotationQuaternion(lFlags1) * Vector3.forward;
                 if (this.mLook == vector3 || this.mLook == -vector3)
@@ -902,9 +1015,7 @@ public class FreightCartMob : MobEntity
             }
             else if (type == JunctionType)
             {
-                ///////////////////////////////////////////////////////////////////////////////
-                //Add handling for when a cart arrives at a junction other than the anticipated one!
-
+                this.SlowTrack = lValue1 == ScrapJunctionVal ? true : false;
                 //Temp force to the old cross-over junction
                 bool dest = false;
 
@@ -921,20 +1032,41 @@ public class FreightCartMob : MobEntity
                 
                 FreightTrackJunction junction = this.mUnderSegment.FetchEntity(eSegmentEntity.Mod, this.mnX, this.mnY - 1L, this.mnZ) as FreightTrackJunction;
                 if (junction == null)
-                    this.RemoveCart("Arrived at null track junction?");
-
-                if (this.NextJunction != null && this.NextJunction != junction)
                 {
-                    Debug.LogWarning("FreightCartMob arrived at junction other than intended.  Suspect track network outdated... rebuilding...");
-                    if (this.LastJunction == null)
-                        Debug.LogWarning("FreightCartMob NextJunction wasn't null when navigating to wrong junction but last is null?");
+                    this.RemoveCart("Arrived at null track junction?");
+                    return;
+                }
+
+                // Check if we're at the same junction... maybe it's checking itself twice?
+                if (this.NextJunction != null && this.NextJunction != junction && junction != this.LastJunction)
+                {
+                    //TODO: Add a check to try to navigate to the destination from here... DONE!
+                    // If we can find it then maybe the network was already rebuilt?  Or at least safe...
+                    // This might cut down significantly on the false rebuilds.
+
+                    Stack<FreightTrackJunction> updatedroute = junction.TrackNetwork.RouteFind(junction, this.DestinationJunction);
+
+                    if (updatedroute.Count > 0)
+                    {
+                        this.JunctionRoute = updatedroute;
+                    }
                     else
                     {
-                        this.LastJunction.InvalidConnection(this.NextJunction);
-                        List<FreightTrackJunction> junctions = new List<FreightTrackJunction>(2);
-                        junctions.Add(this.LastJunction);
-                        junctions.Add(this.NextJunction);
-                        this.NextJunction.TrackNetwork.NetworkIntegrityCheck(junctions);
+                        Debug.LogWarning("FreightCartMob arrived at junction with ID " + junction.JunctionID.ToString() + " expecting junction " + this.NextJunction.JunctionID.ToString() + ".  Suspect track network outdated... rebuilding...");
+                        if (this.LastJunction == null)
+                            Debug.LogWarning("FreightCartMob NextJunction wasn't null when navigating to wrong junction but last is null?");
+                        else if (ManagerSync.RebuildTimer <= 0 && WorldScript.mbIsServer) //Don't rebuild on clients... seems to break things since data is missing....
+                        {
+                            this.LastJunction.InvalidConnection(this.NextJunction);
+                            List<FreightTrackJunction> junctions = new List<FreightTrackJunction>(2);
+                            junctions.Add(this.LastJunction);
+                            junctions.Add(this.NextJunction);
+                            this.NextJunction.TrackNetwork.NetworkIntegrityCheck(junctions);
+                            ManagerSync.RebuildTimer = 60;
+                        }
+                        //Cart is lost so let's clear our destination and recalculate
+                        this.NextJunction = null;
+                        this.DestinationJunction = null;
                     }
                 }
 
@@ -954,12 +1086,15 @@ public class FreightCartMob : MobEntity
                             dest = this.GetLookFromDirection(junction.GetConnectedDirection(this.NextJunction));
                         }
                     }
-                    else if (junction == this.DestinationJunction)
+                    else
                     {
                         //Debug.LogWarning("The current junction is the destination");
                         dest = this.GetLookFromDirection(this.DestinationDirection);
-                        if (this.DestinationDirection >= 0 && this.DestinationDirection <= 3)
-                            this.NextJunction = junction.ConnectedJunctions[this.DestinationDirection];
+
+                        // Don't set the next junction to avoid the risk of rebuilding the network unnecessarily because of a long hold at a station
+                        //if (this.DestinationDirection >= 0 && this.DestinationDirection <= 3)
+                        //    this.NextJunction = junction.ConnectedJunctions[this.DestinationDirection];
+                        this.NextJunction = null;
                         this.DestinationDirection = -1;
                         this.DestinationJunction = null;
                         this.LastJunction = junction;
@@ -967,6 +1102,10 @@ public class FreightCartMob : MobEntity
                     }
                 }
                 //Debug.LogWarning("Freight Cart after pathfinding dest bool is: " + dest.ToString());
+
+                //New Default!! If we haven't decided... turn around.  No more derailing!
+                //this.mLook = -this.mLook;
+
                 //Vanilla code for a straight track -> filler for now (default if destination setting fails!)
                 if (vector3_1.y > 0.5 || vector3_1.y < -0.5)
                     this.RemoveCart("Track Straight hitting non-straight piece!");
@@ -1027,6 +1166,8 @@ public class FreightCartMob : MobEntity
             Debug.LogWarning("FreightCartMob Trying to ChooseDestination for null junction or junction with null network!");
             return;
         }
+        if (FreightCartManager.instance == null)
+            return;
         //Debug.LogWarning("Freight Cart ChoosingDestination");
         if (this.mnUsedStorage > 0)
         {
@@ -1047,29 +1188,52 @@ public class FreightCartMob : MobEntity
             if (this.LocalInventory[networkid].Inventory.Count == 0)
             {
                 Debug.LogWarning("FreightCart tried to choose destination while having empty inventory with used storage?");
+                this.LocalInventory.Remove(networkid);
                 return;
             }
             FreightCartStation station = null;
+
+            // First look for stations that will handle goods we have in inventory
             for (int n = 0; n < this.LocalInventory[networkid].Inventory.Count; n++)
             {
                 ItemBase item = this.LocalInventory[networkid].Inventory[n];
-                if (FreightCartManager.instance.NetworkNeeds(networkid, item) <= 0)
+                // Check if the item is needed, if it isn't needed we'll offload at a compatible station
+                if (FreightCartManager.instance.RegistryDeficit(networkid, item) == 0)
+                {
                     this.OffloadingExcess = true;
+                    //Debug.LogWarning("FreightCartMob needs to offload excess of " + item.ToString() + " from network: " + networkid);
+                }
+                // This will find a station to offload or deliver a serviceable good to
                 station = FreightCartManager.instance.GetStation(networkid, item, this.OffloadingExcess);
                 if (station != null)
-                {
-
                     break;
-                }
+                else  //Make sure this is not still true if we didn't find a place to offload the item
+                    this.OffloadingExcess = false;
             }
+            // If we still don't have a station we'll look for a fitting match
             if (station == null)
             {
                 if (this.mnUsedStorage != this.mnMaxStorage)
-                    station = FreightCartManager.instance.GetStation(networkid, null, false);
+                {
+                    if (!this.IsOreFreighter)
+                        station = FreightCartManager.instance.GetStation(networkid, null, false);
+                    else if (this.OreFreighterItem != null)
+                        station = FreightCartManager.instance.GetStation(networkid, this.OreFreighterItem, false, true);
+                    else
+                        Debug.LogWarning("FreightCartMob: Ore freighter looking for station with filled inventory but null freighter item");
+                }
+                // If we still don't find one we'll take up an assignment with a station so we can at least idle there
                 if (station == null)
                 {
-                    Debug.LogWarning("FreightCartManager returned null station for ChooseDestination of FreightCart");
-                    return;
+                    if (this.AssignedStation == null)
+                        this.TryAssignCart(currentloc.TrackNetwork);
+                    if (this.AssignedStation != null)
+                        station = this.AssignedStation;
+                    if (station == null)
+                    {
+                        Debug.LogWarning("FreightCartManager returned null station for ChooseDestination of FreightCart");
+                        return;
+                    }
                 }
             }
             if (station.ClosestJunction == null || station.JunctionDirection == -1)
@@ -1081,65 +1245,135 @@ public class FreightCartMob : MobEntity
             this.DestinationDirection = station.JunctionDirection;
             this.JunctionRoute = currentloc.TrackNetwork.RouteFind(currentloc, this.DestinationJunction);
         }
-        else
+        else // Cart is empty
         {
-            //Debug.LogWarning("Freight Cart based on empty cart");
+            // Take up an assignment if we don't have one or check for a new assignment if ours is over serviced
             if (this.AssignedStation == null || this.AssignedStation.AvailableCarts > this.AssignedStation.AssignedCarts)
                 this.TryAssignCart(currentloc.TrackNetwork);
             if (this.AssignedStation != null)
             {
                 //Debug.LogWarning("Freight Cart assigned station final selection, direction: " + this.AssignedStation.JunctionDirection.ToString());
                 //Debug.LogWarning("Available/Assigned station available carts: " + this.AssignedStation.AvailableCarts.ToString() + "/" + this.AssignedStation.AssignedCarts.ToString());
-                this.DestinationJunction = this.AssignedStation.ClosestJunction;
-                this.DestinationDirection = this.AssignedStation.JunctionDirection;
-                this.JunctionRoute = null;
-                this.JunctionRoute = currentloc.TrackNetwork.RouteFind(currentloc, this.DestinationJunction);
+
+                this.DestinationJunction = null;
+                //If our assigned station has nothing to offer look for requests to satisfy them by seeking out offering stations
+                if (FreightCartManager.instance.GetStationOfferings(this.AssignedStation).Count == 0)
+                {
+                    List<KeyValuePair<ItemBase, int>> needs = FreightCartManager.instance.GetStationNeeds(this.AssignedStation);
+                    if (needs.Count != 0)
+                    {
+                        FreightCartStation station;
+                        for (int n = 0; n < needs.Count; n++)
+                        {
+                            ItemBase item = needs[n].Key;
+                            if (needs[n].Value == 0)
+                                continue;
+                            //Debug.Log("FreightCartMob looking for station with needs item: " + item.ToString());
+                            // Skip station checks if we're an ore freighter and the item isn't a valid type
+                            if (this.IsOreFreighter && (item.mType != ItemType.ItemCubeStack || (!CubeHelper.IsOre((item as ItemCubeStack).mCubeType))))
+                                continue;
+                            station = FreightCartManager.instance.GetStation(this.AssignedStation.NetworkID, item, false, true);
+                            if (station != null)
+                            {
+                                //Debug.Log("FreightCartMob chose station with ID: " + station.StationID.ToString());
+                                this.DestinationJunction = station.ClosestJunction;
+                                this.DestinationDirection = station.JunctionDirection;
+                                this.JunctionRoute = null;
+                                this.JunctionRoute = currentloc.TrackNetwork.RouteFind(currentloc, this.DestinationJunction);
+                                break;
+                            }
+                        }
+                    }
+                }
+                //Wait at our assigned station for either offers or for needs
+                if (this.DestinationJunction == null) 
+                {
+                    this.DestinationJunction = this.AssignedStation.ClosestJunction;
+                    this.DestinationDirection = this.AssignedStation.JunctionDirection;
+                    this.JunctionRoute = null;
+                    this.JunctionRoute = currentloc.TrackNetwork.RouteFind(currentloc, this.DestinationJunction);
+                }
             }
         }
     }
 
     private void TryAssignCart(FreightTrackNetwork network)
     {
+        int lowestoverage = int.MaxValue;
+        FreightCartStation Candidate = null;
+        if (network == null || network.TrackSegments == null)
+            return;
         //Debug.LogWarning("Freight Cart Trying to assign cart");
         for (int n = 0; n < network.TrackSegments.Count; n++)
         {
             FreightTrackSegment seg = network.TrackSegments[n];
+            if (seg == null)
+                continue;
             //Debug.LogWarning("seg station count: " + seg.Stations.Count);
             for (int m = 0; m < seg.Stations.Count; m++)
             {
                 FreightCartStation station = seg.Stations[m];
-                if (!this.CheckCartTier(station.CartTier))
+                if (station == null || !this.CheckCartTier(station.CartTier))
                     continue;
-                if (station.AvailableCarts < station.AssignedCarts)
+                // Assign the cart to the station if it has explicit free slots, mark it for smart assignment if it has the least excess carts
+                int overage = station.AvailableCarts - station.AssignedCarts;
+                if (overage < 0)
                 {
-                    //Debug.LogWarning("Freight Cart station for assignment found on direction " + station.JunctionDirection.ToString());
-                    if (this.AssignedStation != null)
-                    {
-                        this.AssignedStation.AvailableCarts--;
-                        this.AssignedStation.CartList.Remove(this);
-                    }
-                    this.AssignedStation = station;
-                    this.AssignedStation.AvailableCarts++;
-                    this.AssignedStation.CartList.Add(this);
+                    this.ExchangeStation(this.AssignedStation, station);
                     return;
+                }
+                else if (overage < lowestoverage)
+                {
+                    lowestoverage = overage;
+                    Candidate = station;
                 }
             }
         }
-        //No stations still requiring assigned carts... assign 'intelligently'
-        this.AssignedStation = FreightCartManager.instance.GetNeedyStation();
+        //No stations still requiring assigned carts... assign 'intelligently' -> new code with evenly distribute the excess carts
+        FreightCartStation oldstation = this.AssignedStation;
+        this.ExchangeStation(oldstation, Candidate);
+        // This station needs to be on the same track network.  Currently it doesn't guarantee that so we need to get rid of others if they come up. (For now)
+        //FreightCartStation newstation = FreightCartManager.instance.GetNeedyStation();
+        //if (newstation.ClosestJunction != null && newstation.ClosestJunction.TrackNetwork != null && newstation.ClosestJunction.TrackNetwork.NetworkID == network.NetworkID)
+        //    this.ExchangeStation(oldstation, newstation);
         //Debug.LogWarning("Freight Cart had to revert to getting needy station");
+    }
+
+    private void ExchangeStation(FreightCartStation oldstation, FreightCartStation newstation)
+    {
+        if (newstation == null)
+            return;
+        this.AssignedStation = newstation;
+        this.AssignedStation.AvailableCarts++;
+        this.AssignedStation.CartList.Add(this);
+        if (oldstation != null)
+        {
+            oldstation.AvailableCarts--;
+            oldstation.CartList.Remove(this);
+            oldstation.RequestImmediateNetworkUpdate();
+        }
+        this.AssignedStation.RequestImmediateNetworkUpdate();
     }
 
     private bool CheckCartTier(int carttier)
     {
-        if (carttier == 0)
-            return true;
-        else if (carttier == 1 && this.meType > 0)
-            return true;
-        else if (carttier == 2 && this.meType == eMinecartType.FreightCart_T4)
-            return true;
-        else
-            return false;
+        switch (carttier)
+        {
+            case 0:  // Any
+                return true;
+            case 1:  // T2/3+ 
+                return !(this.meType == eMinecartType.FreightCart_T1 || this.meType == eMinecartType.OreFreighter_T1 || this.meType == eMinecartType.ScrapCartMK1);
+            case 2:  // T4
+                return this.meType == eMinecartType.FreightCart_T4 || this.meType == eMinecartType.OreFreighter_T4;
+            case 3:  // Ore Freighters Only
+                return this.IsOreFreighter;
+            case 4:  // T2/3+ Ore Freighters
+                return this.IsOreFreighter && this.meType != eMinecartType.OreFreighter_T1;
+            case 5: // T4 Ore Freighters
+                return this.meType == eMinecartType.OreFreighter_T4;
+            default: // Unknown
+                return false;
+        }
     }
 
     /// <summary>
@@ -1159,7 +1393,10 @@ public class FreightCartMob : MobEntity
             this.mLook = Vector3.back;
         else
         {
-            Debug.LogWarning("FreightCartMob attempted to set look by direction but failed with direction: " + direction.ToString());
+            Debug.LogWarning("FreightCartMob attempted to set look by direction but failed with direction: " + direction.ToString() + " Dropping destination to pick a new one");
+            this.DestinationJunction = null;
+            this.NextJunction = null;
+            this.DestinationDirection = -1;
             return false;
         }
         //Debug.LogWarning("Look selected from direction with look: " + this.mLook.ToString() + " from direction: " + direction.ToString());
@@ -1256,27 +1493,68 @@ public class FreightCartMob : MobEntity
 
     private void RemoveCart(string lReason)
     {
-        Debug.Log((object)("****** LITTLE JIMMY DROP CARTS ******[" + lReason + "]"));
+        Vector3 vector3 = WorldScript.instance.mPlayerFrustrum.GetCoordsToUnity(this.mnX, this.mnY, this.mnZ);
+
+        //Hack to prevent a one off derailing of the cart
+        if (this.SlopeCatch == -1)
+        {
+            Debug.Log("FreightCartMob tried to remove itself but skipped the first check for unnecessary derailment protections");
+            this.SlopeCatch = this.mnUpdates;
+            return;
+        }
+
+        Debug.Log("****** LITTLE JIMMY DROP CARTS ******[" + lReason + "],  Cart was at position: " + vector3.ToString() + " with look: " + this.mLook.ToString() + " and speed: " + this.mrSpeed.ToString());
         if (this.mnUpdates <= 1)
             Debug.LogWarning((object)"Probable issue - minecart decided to drop on or before first update!");
+
+        if (MissionManager.instance != null)
+            MissionManager.instance.AddMission("Freightcart derailed!", 60.0f, Mission.ePriority.eCritical, false, false);
+
         System.Random random = new System.Random();
         int itemID = ItemEntries.MineCartT1;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCartMK1)
-            itemID = ModManager.mModMappings.ItemsByKey["steveman0.FreightCartMK1"].ItemId;
 
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T1)
-            itemID = ItemEntries.MineCartT1;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T2)
-            itemID = ItemEntries.MineCartT2;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T3)
-            itemID = ItemEntries.MineCartT3;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCart_T4)
-            itemID = ItemEntries.MineCartT4;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCartTour)
-            itemID = ItemEntries.TourCart;
-        if (this.meType == FreightCartMob.eMinecartType.FreightCartTourBasic)
-            itemID = ModManager.mModMappings.ItemsByKey["steveman0.FreightTourBasic"].ItemId;
-
+        switch (this.meType)
+        {
+            case eMinecartType.FreightCart_T1:
+                itemID = ItemEntries.MineCartT1;
+                break;
+            case eMinecartType.FreightCart_T2:
+                itemID = ItemEntries.MineCartT2;
+                break;
+            case eMinecartType.FreightCart_T3:
+                itemID = ItemEntries.MineCartT3;
+                break;
+            case eMinecartType.FreightCart_T4:
+                itemID = ItemEntries.MineCartT4;
+                break;
+            case eMinecartType.FreightCartTour:
+                itemID = ItemEntries.TourCart;
+                break;
+            case eMinecartType.FreightCartTourBasic:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.FreightTourBasic"].ItemId;
+                break;
+            case eMinecartType.FreightCartMK1:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.FreightCartMK1"].ItemId;
+                break;
+            case eMinecartType.OreFreighter_T1:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT1"].ItemId;
+                break;
+            case eMinecartType.OreFreighter_T2:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT2"].ItemId;
+                break;
+            case eMinecartType.OreFreighter_T3:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT3"].ItemId;
+                break;
+            case eMinecartType.OreFreighter_T4:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT4"].ItemId;
+                break;
+            case eMinecartType.ScrapCartMK1:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.ScrapCartMK1"].ItemId;
+                break;
+            case eMinecartType.ScrapOreFreighterMK1:
+                itemID = ModManager.mModMappings.ItemsByKey["steveman0.ScrapOreFreighterMK1"].ItemId;
+                break;
+        }
         if (WorldScript.mbIsServer)
         {
             ItemBase itemBase = ItemManager.SpawnItem(itemID);
@@ -1317,7 +1595,14 @@ public class FreightCartMob : MobEntity
             }
         }
 
-        MobManager.instance.DestroyMob((MobEntity)this);
+        //Remove cart assignment!
+        if (this.AssignedStation != null)
+        {
+            this.AssignedStation.AvailableCarts--;
+            this.AssignedStation.CartList.Remove(this);
+        }
+
+        MobManager.instance.DestroyMob(this);
         this.mnUpdatesPerTick = 0;
     }
 
@@ -1368,6 +1653,125 @@ public class FreightCartMob : MobEntity
         return true;
     }
 
+    public override void ReadNetworkUpdate(BinaryReader reader, int version)
+    {
+        try
+        {
+            if (ReadNullDebug)
+                Debug.LogWarning("FreightCartMob ReadNullDebug at start of reading");
+            this.meType = (FreightCartMob.eMinecartType)reader.ReadInt32();
+            this.mrTargetSpeed = reader.ReadSingle();
+            this.mrSpeed = reader.ReadSingle();
+            this.SetStatsFromType();
+            this.mrTargetSpeed = (float)this.rand.Next(95, 105) / 100f * this.mrSpeedScalar;
+
+            FreightTrackNetwork tracknetwork = null;
+            if (this.LastJunction != null && this.LastJunction.TrackNetwork != null)
+                tracknetwork = this.LastJunction.TrackNetwork;
+
+            int juncid = reader.ReadInt32();
+            if (juncid != -1 && tracknetwork != null)
+                this.DestinationJunction = tracknetwork.GetJunctionFromID(juncid);
+            else
+                this.DestinationJunction = null;
+            this.DestinationDirection = reader.ReadInt32();
+
+            juncid = reader.ReadInt32();
+            if (juncid != -1 && tracknetwork != null)
+                this.NextJunction = tracknetwork.GetJunctionFromID(juncid);
+            else
+                this.NextJunction = null;                
+
+            int count = reader.ReadInt32();
+            this.mnUsedStorage = 0;
+            if (ReadNullDebug)
+                Debug.LogWarning("FreightCartMob ReadNullDebug prior to inventory loop");
+            for (int index = 0; index < count; index++)
+            {
+                string networkid = reader.ReadString();
+                if (string.IsNullOrEmpty(networkid))
+                {
+                    Debug.LogError("FreightCartMob read in inventory with null/empty network ID.  CORRUPTION SUSPECTED!");
+                    continue;
+                }
+                MachineInventory inv = new MachineInventory(this, this.mnMaxStorage);
+                inv.ReadInventory(reader);
+                if (!this.LocalInventory.ContainsKey(networkid))
+                    this.LocalInventory.Add(networkid, inv);
+                else
+                    this.LocalInventory[networkid] = inv;
+                this.mnUsedStorage += inv.ItemCount();
+                int count2 = this.LocalInventory[networkid].Inventory.Count;
+                if (ReadNullDebug)
+                    Debug.LogWarning("FreightCartMob ReadNullDebug in inventory loop before items at loop iteration: " + index.ToString());
+                for (int n = 0; n < count2; n++)
+                {
+                    ItemBase item = this.LocalInventory[networkid].Inventory[n];
+                    if (item == null)
+                    {
+                        Debug.LogError("FreightCartMob loaded in with a null item in its inventory.  CORRUPTION SUSPECTED!");
+                        this.LocalInventory[networkid].Inventory.RemoveAt(n);
+                        n--;
+                        continue;
+                    }
+                    //bool checkreg;
+                    //if (FreightCartManager.instance == null)
+                    //    checkreg = false;
+                    //else
+                    //    checkreg = FreightCartManager.instance.NetworkAdd(networkid, item, item.GetAmount());
+                    //if (!checkreg)
+                    //{
+                    //    this.TransitCheckIn = false;
+                    //    break;
+                    //}
+                }
+            }
+            if (ReadNullDebug)
+                Debug.LogWarning("FreightCartMob ReadNullDebug after inventory reading");
+            if (this.TransferInventory == null)
+            {
+                Debug.LogWarning("FreightCartMob was reading from the network but failed to get a cart type, Transfer inventory defined!");
+                this.TransferInventory = new MachineInventory(this, 500);
+            }
+            this.TransferInventory.ReadInventory(reader);
+        }
+        catch (NullReferenceException e)
+        {
+            Debug.LogError("FreightCartMob read had an NRE!  Activating additional debugging.  Please provide steveman0 the log file!");
+            ReadNullDebug = true;
+        }
+    }
+
+    public override void WriteNetworkUpdate(BinaryWriter writer)
+    {
+        writer.Write((int)this.meType);
+        writer.Write(this.mrTargetSpeed);
+        writer.Write(this.mrSpeed);
+
+        if (this.DestinationJunction != null)
+            writer.Write(this.DestinationJunction.JunctionID);
+        else
+            writer.Write(-1);
+        writer.Write(this.DestinationDirection);
+        if (this.NextJunction != null)
+            writer.Write(this.NextJunction.JunctionID);
+        else
+            writer.Write(-1);
+
+        //writer.Write((byte)meLoadState);
+
+        List<string> keys = new List<string>();
+        if (this.LocalInventory != null)
+            keys = this.LocalInventory.Keys.ToList();
+        writer.Write(keys.Count);
+        for (int index = 0; index < keys.Count; index++)
+        {
+            writer.Write(keys[index]);
+            this.LocalInventory[keys[index]].WriteInventory(writer);
+        }
+        this.TransferInventory.WriteInventory(writer);
+    }
+
     public override void Write(BinaryWriter writer)
     {
         writer.Write((int)this.meType);
@@ -1388,37 +1792,84 @@ public class FreightCartMob : MobEntity
 
     public override void Read(BinaryReader reader, int version)
     {
-        this.meType = (FreightCartMob.eMinecartType)reader.ReadInt32();
-        this.mrTargetSpeed = reader.ReadSingle();
-        this.mrSpeed = reader.ReadSingle();
-        this.SetStatsFromType();
-        this.mrTargetSpeed = (float)this.rand.Next(95, 105) / 100f * this.mrSpeedScalar;
-
-        int count = reader.ReadInt32();
-        this.mnUsedStorage = 0;
-        for (int index = 0; index < count; index++)
+        try
         {
-            string networkid = reader.ReadString();
-            MachineInventory inv = new MachineInventory(this, this.mnMaxStorage);
-            inv.ReadInventory(reader);
-            if (!this.LocalInventory.ContainsKey(networkid))
-                this.LocalInventory.Add(networkid, inv);
-            else
-                this.LocalInventory[networkid] = inv;
-            this.mnUsedStorage += inv.ItemCount();
-            int count2 = this.LocalInventory[networkid].Inventory.Count;
-            for (int n = 0; n < count2; n++)
+            if (ReadNullDebug)
+                Debug.LogWarning("FreightCartMob ReadNullDebug at start of reading");
+            this.meType = (FreightCartMob.eMinecartType)reader.ReadInt32();
+            this.mrTargetSpeed = reader.ReadSingle();
+            this.mrSpeed = reader.ReadSingle();
+            this.SetStatsFromType();
+            this.mrTargetSpeed = (float)this.rand.Next(95, 105) / 100f * this.mrSpeedScalar;
+
+            int count = reader.ReadInt32();
+            this.mnUsedStorage = 0;
+            if (ReadNullDebug)
+                Debug.LogWarning("FreightCartMob ReadNullDebug prior to inventory loop");
+            for (int index = 0; index < count; index++)
             {
-                ItemBase item = this.LocalInventory[networkid].Inventory[n];
-                bool checkreg = FreightCartManager.instance.NetworkAdd(networkid, item, item.GetAmount());
-                if (!checkreg)
+                string networkid = reader.ReadString();
+                if (string.IsNullOrEmpty(networkid))
                 {
-                    this.TransitCheckIn = false;
-                    break;
+                    Debug.LogError("FreightCartMob read in inventory with null/empty network ID.  CORRUPTION SUSPECTED!");
+                    continue;
+                }
+                MachineInventory inv = new MachineInventory(this, this.mnMaxStorage);
+                inv.ReadInventory(reader);
+                if (this.LocalInventory == null)
+                {
+                    Debug.LogWarning("FreightCartMob read found a null local inventory.  Did initialization fail?");
+                    continue;
+                }
+                if (!this.LocalInventory.ContainsKey(networkid))
+                    this.LocalInventory.Add(networkid, inv);
+                else
+                    this.LocalInventory[networkid] = inv;
+                this.mnUsedStorage += inv.ItemCount();
+                if (this.LocalInventory[networkid] == null || this.LocalInventory[networkid].Inventory == null)
+                {
+                    Debug.LogWarning("FreightCartMob read had a null inventory when it was just set.  How could this happen?");
+                    continue;
+                }
+                int count2 = this.LocalInventory[networkid].Inventory.Count;
+                if (ReadNullDebug)
+                    Debug.LogWarning("FreightCartMob ReadNullDebug in inventory loop before items at loop iteration: " + index.ToString());
+                for (int n = 0; n < count2; n++)
+                {
+                    ItemBase item = this.LocalInventory[networkid].Inventory[n];
+                    if (item == null)
+                    {
+                        Debug.LogError("FreightCartMob loaded in with a null item in its inventory.  CORRUPTION SUSPECTED!");
+                        this.LocalInventory[networkid].Inventory.RemoveAt(n);
+                        n--;
+                        continue;
+                    }
+                    bool checkreg;
+                    if (FreightCartManager.instance == null)
+                        checkreg = false;
+                    else
+                        checkreg = FreightCartManager.instance.NetworkAdd(networkid, item, item.GetAmount());
+                    if (!checkreg)
+                    {
+                        this.TransitCheckIn = false;
+                        break;
+                    }
                 }
             }
+            if (ReadNullDebug)
+                Debug.LogWarning("FreightCartMob ReadNullDebug after inventory reading");
+            if (this.TransferInventory == null)
+            {
+                Debug.LogWarning("FreightCartMob was reading from the network but failed to get a cart type, Transfer inventory defined!");
+                this.TransferInventory = new MachineInventory(this, 500);
+            }
+            this.TransferInventory.ReadInventory(reader);
         }
-        this.TransferInventory.ReadInventory(reader);
+        catch (Exception e)
+        {
+            Debug.LogError("FreightCartMob read had an Exception!  Activating additional debugging.  Please provide steveman0 the log file! Excpetion: " + e.Message);
+            ReadNullDebug = true;
+        }
     }
 
     public enum eTrackType
@@ -1445,9 +1896,15 @@ public class FreightCartMob : MobEntity
         FreightCart_T2,
         FreightCart_T3,
         FreightCart_T4,
-        FreightCartMK1,
-        FreightCartTour,
+        FreightCartMK1, //Not currently used - just a test cart
+        FreightCartTour, 
         FreightCartTourBasic,
+        OreFreighter_T1,
+        OreFreighter_T2,
+        OreFreighter_T3,
+        OreFreighter_T4,
+        ScrapCartMK1,
+        ScrapOreFreighterMK1,
         //Basic,
         //Fast,
         //Large,

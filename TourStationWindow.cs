@@ -165,8 +165,9 @@ public class TourStationWindow : BaseMachineWindow
         if (station.TrackNetwork != null)
             station.TrackNetwork.TourCartStations.Add(station.StationName, station);
         if (!WorldScript.mbIsServer)
-            NetworkManager.instance.SendInterfaceCommand("TourStationWindow", "SetStationName", stationname, null, station, 0f);
+            NetworkManager.instance.SendInterfaceCommand(InterfaceName, InterfaceStationName, stationname, null, station, 0f);
         TourStationWindow.networkredraw = true;
+        station.RequestImmediateNetworkUpdate();
         station.MarkDirtyDelayed();
     }
 
@@ -185,7 +186,7 @@ public class TourStationWindow : BaseMachineWindow
         string command = nic.command;
         if (command != null)
         {
-            if (command == "SetStationName")
+            if (command == InterfaceStationName)
                 TourStationWindow.SetStationName(station, nic.payload);
         }
 

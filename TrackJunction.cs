@@ -33,19 +33,39 @@ public class FreightTrackJunction : MachineEntity
     public static ushort FREIGHTSTATIONTYPE = ModManager.mModMappings.CubesByKey["steveman0.FreightCartStation"].CubeType;
     public static ushort JUNCTIONTYPE = ModManager.mModMappings.CubesByKey["steveman0.TrackJunction"].CubeType;
     public static ushort TOURSTATIONTYPE = ModManager.mModMappings.CubesByKey["steveman0.TourCartStation"].CubeType;
+    public static ushort ScrapJunctionVal = ModManager.mModMappings.CubesByKey["steveman0.TrackJunction"].ValuesByKey["steveman0.ScrapTrackJunction"].Value;
+    public static ushort ScrapTrackType = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].CubeType;
+    public static ushort ScrapStraightVal = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].ValuesByKey["steveman0.ScrapTrackStraight"].Value;
+    public static ushort ScrapCornerVal = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].ValuesByKey["steveman0.ScrapTrackCorner"].Value;
+    public static ushort ScrapSlopeVal = ModManager.mModMappings.CubesByKey["steveman0.ScrapTrack"].ValuesByKey["steveman0.ScrapTrackSlope"].Value;
 
-    private GameObject CrossTrack;
     private Segment mPrevGetSeg;
     private Segment mUnderSegment;
     private int Updates = 0;
     private int[] DelayCheck = new int[4];
+
+    //Rendering stuff
+    public int instanceID = -1;
+    public int instanceID2 = -1;
+    public static Mesh TrackMesh;
+    public static Mesh TrackMesh2;
+    public static Material TrackMaterial;
+    public static Material ScrapTrackMat; // Move to the scrap track entity...
+    private JunctionRenderer TrackRenderer;
+    private GameObject CrossTrack;
 
     public FreightTrackJunction(ModCreateSegmentEntityParameters parameters)
         : base(parameters)
     {
         this.mbNeedsUnityUpdate = true;
         this.mbNeedsLowFrequencyUpdate = true;
-        this.JunctionID = GlobalJunctions;
+        if (WorldScript.mbIsServer)
+        {
+            this.JunctionID = GlobalJunctions;
+            this.RequestImmediateNetworkUpdate(); //Is this necessary?
+        }
+        else
+            this.JunctionID = -1;
         GlobalJunctions++;
 
         this.TrackNetwork = new FreightTrackNetwork(this);
@@ -58,10 +78,6 @@ public class FreightTrackJunction : MachineEntity
         string str3;
         string str4 = "";
         string str5 = "";
-        ///////////////////////////////////////////
-        //Add the ability to reset a junction with E
-        //The idea is that if you change the track you may temporarily block off one route with a buffer
-        //Without a reset you can't force the junction to double check its routes without replacing it
 
         str1 = "Track Junction (ID: " + this.JunctionID + ")\n";
         int count = 0;
@@ -180,7 +196,7 @@ public class FreightTrackJunction : MachineEntity
                 type = cube;
                 lFlags1 = lFlags2;
                 lValue1 = lValue2;
-                if (type == 538 && lValue1 == 2)
+                if ((type == 538 && lValue1 == 2) || (type == ScrapTrackType && lValue1 == ScrapSlopeVal))
                 {
                     foundslope = true;
                     nextY--; //decrement Y level for next loop through!
@@ -205,10 +221,10 @@ public class FreightTrackJunction : MachineEntity
             trackvec.y = trackvec.y >= -0.5 ? (trackvec.y <= 0.5 ? 0.0f : 1f) : -1f;
             trackvec.z = trackvec.z >= -0.5 ? (trackvec.z <= 0.5 ? 0.0f : 1f) : -1f;
             //Begin checking track type
-            if (type == TRACKTYPE)
+            if (type == TRACKTYPE || type == ScrapTrackType)
             {
 
-                if (lValue1 == TRACKSTRAIGHT || lValue1 == TRACKEMPTY || lValue1 == TRACKFULL)
+                if ((type == TRACKTYPE && (lValue1 == TRACKSTRAIGHT || lValue1 == TRACKEMPTY || lValue1 == TRACKFULL)) || (type == ScrapTrackType && lValue1 == ScrapStraightVal))
                 {
                     if (trackvec.y > 0.5 || trackvec.y < -0.5)
                         return false;
@@ -217,7 +233,7 @@ public class FreightTrackJunction : MachineEntity
                         dirvec = new Vector3(trackvec.x, 0f, trackvec.z);
                     }
                 }
-                if (lValue1 == TRACKCORNER)
+                if ((type == TRACKTYPE && lValue1 == TRACKCORNER) || (type == ScrapTrackType && lValue1 == ScrapCornerVal))
                 {
                     if (dirvec == new Vector3(-trackvec.z, 0.0f, trackvec.x))
                         dirvec = new Vector3(dirvec.z, 0.0f, -dirvec.x);
@@ -226,7 +242,7 @@ public class FreightTrackJunction : MachineEntity
                     else
                         return false;
                 }
-                if (lValue1 == TRACKSLOPE)
+                if ((type == TRACKTYPE && lValue1 == TRACKSLOPE) || (type == ScrapTrackType && lValue1 == ScrapSlopeVal))
                 {
                     Vector3 vector3_2 = trackvec;
                     dirvec.y = 0.0f;
@@ -235,11 +251,13 @@ public class FreightTrackJunction : MachineEntity
                     {
                         if (foundslope)
                             return false;
+                        else
+                            nextY++;
                     }
                     else if (dirvec == -trackvec)
                         ;
                 }
-                if (lValue1 == TRACKBUFFER)
+                if (type == TRACKTYPE && lValue1 == TRACKBUFFER)
                 {
                     dirvec = new Vector3(-dirvec.x, 0f, -dirvec.z);
                 }
@@ -388,28 +406,69 @@ public class FreightTrackJunction : MachineEntity
         }
         return false;
     }
+
+    public override void SpawnGameObject()
+    {
+        return;
+    }
+
     public override void UnityUpdate()
     {
         if (!mbLinkedToGO)
         {
-            if (mWrapper == null || mWrapper.mGameObjectList == null || SpawnableObjectManagerScript.instance == null || SpawnableObjectManagerScript.instance.maSpawnableObjects == null || SpawnableObjectManagerScript.instance.maSpawnableObjects[(int)SpawnableObjectEnum.Minecart_Track_Straight] == null)
-            {
+            // Update the instanced version
+            //this.instanceID = FreightCartMod.TrackInstances.TryAdd();
+            //this.instanceID2 = FreightCartMod.TrackInstances.TryAdd();
+            //this.UpdateInstancedBase();
+            //if (instanceID != -1 && instanceID2 != -1)
+            //{
+            //    this.mbLinkedToGO = true;
+            //    this.LinkStatusDirty = true;
+            //}
+
+            if (this.CrossTrack != null || FreightTrackJunction.TrackMesh == null || FreightTrackJunction.TrackMesh2 == null || FreightTrackJunction.TrackMaterial == null)
                 return;
-            }
-            else
-            {
-                this.CrossTrack = (GameObject)GameObject.Instantiate(SpawnableObjectManagerScript.instance.maSpawnableObjects[(int)SpawnableObjectEnum.Minecart_Track_Straight]);
-                this.CrossTrack.transform.parent = mWrapper.mGameObjectList[0].gameObject.transform;
-                this.CrossTrack.transform.localPosition = new Vector3(0, 0f, 0);//put in the correct relative position
-                mWrapper.mGameObjectList[0].gameObject.transform.eulerAngles = new Vector3(0, 0, 0);
-                this.CrossTrack.transform.eulerAngles = new Vector3(0, 90f, 0);
-                this.CrossTrack.transform.localScale = new Vector3(0.99f, 0.99f, 0.99f);
-                this.CrossTrack.SetActive(true);
-                this.mbLinkedToGO = true;
-                this.LinkStatusDirty = true;
-            }
+            
+            Quaternion rot = SegmentCustomRenderer.GetRotationQuaternion(this.mFlags);
+            Quaternion rot2 = rot * Quaternion.Euler(Vector3.up * 90);
+            MaterialPropertyBlock materialPropertyBlock = new MaterialPropertyBlock();
+            materialPropertyBlock.SetColor("_GlowColor", Color.red);
+            materialPropertyBlock.SetFloat("_GlowMult", 5f);
+
+            this.CrossTrack = new GameObject();
+            JunctionRenderer ren = this.CrossTrack.AddComponent<JunctionRenderer>();
+            Vector3 lUnityPos = WorldScript.instance.mPlayerFrustrum.GetCoordsToUnity(this.mnX, this.mnY, this.mnZ);
+            lUnityPos.x += 0.5f;
+            lUnityPos.y += 0.5f;
+            lUnityPos.z += 0.5f;
+            ren.position = lUnityPos;
+            ren.rotation = rot;
+            ren.rotation2 = rot2;
+            ren.mpb = materialPropertyBlock;
+            ren.scrap = this.mValue == FreightTrackJunction.ScrapJunctionVal;
+
+            ren.enabled = true;
+            ren.gameObject.SetActive(true);
+            this.CrossTrack.SetActive(true);
+            this.TrackRenderer = ren;
+            this.mbLinkedToGO = true;
+
+            //if (mWrapper == null || mWrapper.mGameObjectList == null || SpawnableObjectManagerScript.instance == null || SpawnableObjectManagerScript.instance.maSpawnableObjects == null || SpawnableObjectManagerScript.instance.maSpawnableObjects[(int)SpawnableObjectEnum.Minecart_Track_Straight] == null)
+            //{
+            //    return;
+            //}
+            //else
+            //{
+            //    //this.CrossTrack = (GameObject)GameObject.Instantiate(SpawnableObjectManagerScript.instance.maSpawnableObjects[(int)SpawnableObjectEnum.Minecart_Track_Straight]);
+            //    //this.CrossTrack.transform.parent = mWrapper.mGameObjectList[0].gameObject.transform;
+            //    //this.CrossTrack.transform.localPosition = new Vector3(0, 0f, 0);//put in the correct relative position
+            //    //mWrapper.mGameObjectList[0].gameObject.transform.eulerAngles = new Vector3(0, 0, 0);
+            //    //this.CrossTrack.transform.eulerAngles = new Vector3(0, 90f, 0);
+            //    //this.CrossTrack.transform.localScale = new Vector3(0.99f, 0.99f, 0.99f);
+            //    //this.CrossTrack.SetActive(true);
+            //}
         }
-        if (this.mbLinkedToGO && this.LinkStatusDirty && this.CrossTrack != null)
+        if (this.mbLinkedToGO && this.LinkStatusDirty)
         {
             Color value = Color.red;
             int links = 0;
@@ -433,22 +492,59 @@ public class FreightTrackJunction : MachineEntity
                     value = Color.blue;
                     break;
             }
-            Renderer[] componentsInChildren = this.CrossTrack.GetComponentsInChildren<Renderer>();
-            Renderer[] comp2 = this.mWrapper.mGameObjectList[0].GetComponentsInChildren<Renderer>();
-            MaterialPropertyBlock materialPropertyBlock = new MaterialPropertyBlock();
-            materialPropertyBlock.SetColor("_GlowColor", value);
-            materialPropertyBlock.SetFloat("_GlowMult", 5f);
-            for (int i = 0; i < componentsInChildren.Length; i++)
-                componentsInChildren[i].SetPropertyBlock(materialPropertyBlock);
-            for (int i = 0; i < comp2.Length; i++)
-                comp2[i].SetPropertyBlock(materialPropertyBlock);
+            //Renderer[] componentsInChildren = this.CrossTrack.GetComponentsInChildren<Renderer>();
+            //Renderer[] comp2 = this.mWrapper.mGameObjectList[0].GetComponentsInChildren<Renderer>();
+            //MaterialPropertyBlock materialPropertyBlock = new MaterialPropertyBlock();
+            //materialPropertyBlock.SetColor("_GlowColor", value);
+            //materialPropertyBlock.SetFloat("_GlowMult", 5f);
+            //for (int i = 0; i < componentsInChildren.Length; i++)
+            //    componentsInChildren[i].SetPropertyBlock(materialPropertyBlock);
+            //for (int i = 0; i < comp2.Length; i++)
+            //    comp2[i].SetPropertyBlock(materialPropertyBlock);
+
+            if (this.TrackRenderer != null)
+                this.TrackRenderer.mpb.SetColor("_GlowColor", value);
+
+            if (this.instanceID != -1 && this.instanceID2 != -1)
+            {
+                //Debug.Log("Setting Track instance color as value: " + value.ToString());
+                FreightCartMod.TrackInstances.SetCol(this.instanceID, value);
+                FreightCartMod.TrackInstances.SetParamVal(this.instanceID, 1f);
+                FreightCartMod.TrackInstances.SetCol(this.instanceID2, value);
+                FreightCartMod.TrackInstances.SetParamVal(this.instanceID2, 1f);
+            }
             this.LinkStatusDirty = false;
         }
+    }
+
+    void UpdateInstancedBase()
+    {
+        if (instanceID == -1 || instanceID2 == -1) return;
+
+        Vector3 lUnityPos = WorldScript.instance.mPlayerFrustrum.GetCoordsToUnity(this.mnX, this.mnY, this.mnZ);
+        lUnityPos.x += 0.5f;
+        lUnityPos.y += 0.5f;
+        lUnityPos.z += 0.5f;
+
+        //lUnityPos += mUp * -0.2174988f;
+
+        //Vector3 rot = SegmentCustomRenderer.GetRotationQuaternion(mFlags).eulerAngles;
+        Vector3 rot = Vector3.zero;
+        Vector3 rot2 = new Vector3(0, 90f, 0);
+        Vector3 sizeadjust = new Vector3(0.99f, 0.99f, 0.99f); // to prevent render flickering
+
+        // Create my own instancer and just call that one instead!
+        FreightCartMod.TrackInstances.SetMatrix(instanceID, lUnityPos, rot, Vector3.one);
+        FreightCartMod.TrackInstances.SetMatrix(instanceID2, lUnityPos, rot2, sizeadjust);
     }
 
     public override void UnitySuspended()
     {
         GameObject.Destroy(this.CrossTrack);
+        if (this.instanceID != -1)
+            FreightCartMod.TrackInstances.Remove(this.instanceID);
+        if (this.instanceID2 != -1)
+            FreightCartMod.TrackInstances.Remove(this.instanceID2);
         this.CrossTrack = null;
         this.mbLinkedToGO = false;
         base.UnitySuspended();
@@ -489,6 +585,8 @@ public class FreightTrackJunction : MachineEntity
             long segZ;
             WorldHelper.GetSegmentCoords(lTestX, lTestY, lTestZ, out segX, out segY, out segZ);
             segment = WorldScript.instance.GetSegment(segX, segY, segZ);
+            if (segment == null)
+                this.AttemptGetSegment(segX, segY, segZ);
         }
         if (segment == null || !segment.mbInitialGenerationComplete || segment.mbDestroyed)
         {
@@ -518,14 +616,14 @@ public class FreightTrackJunction : MachineEntity
 
     public void ResetJunction()
     {
-        this.OnDelete();
+        this.ClearConnections();
         Array.Clear(this.ConnectedJunctions, 0, 4);
         Array.Clear(this.ConnectedSegments, 0, 4);
         Array.Clear(this.SegmentDistances, 0, 4);
         this.TrackNetwork = new FreightTrackNetwork(this);
     }
 
-    public override void OnDelete()
+    private void ClearConnections()
     {
         for (int n = 0; n < 4; n++)
         {
@@ -555,6 +653,16 @@ public class FreightTrackJunction : MachineEntity
         }
         this.TrackNetwork.TrackJunctions.Remove(this);
         this.TrackNetwork.NetworkIntegrityCheck(this.ConnectedJunctions.ToList());
+    }
+
+    public override void OnDelete()
+    {
+        if (this.instanceID != -1)
+            FreightCartMod.TrackInstances.Remove(this.instanceID);
+        if (this.instanceID2 != -1)
+            FreightCartMod.TrackInstances.Remove(this.instanceID2);
+        GameObject.Destroy(this.CrossTrack);
+        this.ClearConnections();
     }
 
     public void InvalidConnection(FreightTrackJunction missingtarget)
@@ -596,7 +704,22 @@ public class FreightTrackJunction : MachineEntity
 
     public override int GetVersion()
     {
-        return 1;
+        return 2;
+    }
+
+    public override bool ShouldNetworkUpdate()
+    {
+        return true;
+    }
+
+    public override void WriteNetworkUpdate(BinaryWriter writer)
+    {
+        writer.Write(this.JunctionID);
+    }
+
+    public override void ReadNetworkUpdate(BinaryReader reader)
+    {
+        this.JunctionID = reader.ReadInt32();
     }
 
     public override void Write(BinaryWriter writer)
@@ -604,11 +727,21 @@ public class FreightTrackJunction : MachineEntity
         //Maybe don't do this to start?  See if the cost is noticeable
         //Write coordinates for connected junctions so that every load it doesn't need to follow every track segment again
         //Will need to write segment length as well for segment recreation on load
+        //... nah :D
+
+        writer.Write(this.JunctionID);
+
         base.Write(writer);
     }
 
     public override void Read(BinaryReader reader, int entityVersion)
     {
+        if (entityVersion > 1)
+        {
+            this.JunctionID = reader.ReadInt32();
+            if (this.JunctionID >= GlobalJunctions)
+                GlobalJunctions = this.JunctionID + 1;
+        }
         base.Read(reader, entityVersion);
     }
 }

@@ -19,7 +19,6 @@ public class FreightSystemMonitor : MachineEntity
 
     public override string GetPopupText()
     {
-        //UIUtil.HandleThisMachineWindow(this, MonitorPanel);
         //Hold down right alt and press left alt for debug printed to log
         if (Input.GetKeyDown(KeyCode.LeftAlt) && Input.GetKey(KeyCode.RightAlt))
         {
@@ -30,18 +29,9 @@ public class FreightSystemMonitor : MachineEntity
         {
             Debug.LogWarning("------------FREIGHT CART DEBUG---------------\nTotal Freight carts spawned: " + ManagerSync.instance.CartCounter.ToString());
             FloatingCombatTextManager.instance.QueueText(this.mnX, this.mnY + 1L, this.mnZ, 1f, "Total Freight Carts Spawned: " + ManagerSync.instance.CartCounter.ToString(), Color.yellow, 2f, 64f);
-            FreightCartMod.LiveUpdateTime = FreightCartMod.Update;
+            FreightCartMod.LiveUpdateTime = FreightCartMod.UpdateCounter;
             FreightCartMod.monitor = this;
         }
-        //if (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.RightAlt))
-        //{
-        //    System.Random random = new System.Random();
-        //    ItemBase item = ItemManager.SpawnItem(ItemEntry.GetIDFromKey("CopperBar", true)).SetAmount(100);
-        //    Vector3 velocity = new Vector3((float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f);
-        //    ItemManager.instance.DropItem(item, this.mnX, this.mnY, this.mnZ, velocity);
-        //}
-
-
         string str1 = "Freight System Monitor\n";
         string str2 = "Press E to access Freight System Status\n";
         string str3 = "Press Q to display global cart status";

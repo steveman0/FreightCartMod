@@ -12,6 +12,15 @@ public class FreightCartFactory : MachineEntity
     public int mnTotalHoppers;
     public bool mbCannotFindResource;
 
+    public static int orefreighterT1 = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT1"].ItemId;
+    public static int orefreighterT2 = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT2"].ItemId;
+    public static int orefreighterT3 = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT3"].ItemId;
+    public static int orefreighterT4 = ModManager.mModMappings.ItemsByKey["steveman0.OreFreighterT4"].ItemId;
+    public static int scrapcart = ModManager.mModMappings.ItemsByKey["steveman0.ScrapCartMK1"].ItemId;
+    public static int scraporefreighter = ModManager.mModMappings.ItemsByKey["steveman0.ScrapOreFreighterMK1"].ItemId;
+
+
+
     public FreightCartFactory(ModCreateSegmentEntityParameters parameters)
       : base(parameters)
     {
@@ -60,8 +69,17 @@ public class FreightCartFactory : MachineEntity
             this.UpdateAttachedHoppers(false);
             this.mrSpawnDelay = 1f;
             int lnHopper = 0;
-            while (lnHopper < this.mnNumAttachedValidHoppers && (!this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT1, "steveman0.FreightCart_T1") && !this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT2, "steveman0.FreightCart_T2")) && (!this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT3, "steveman0.FreightCart_T3") && !this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT4, "steveman0.FreightCart_T4")))
-                ++lnHopper;
+            while (lnHopper < this.mnNumAttachedValidHoppers && 
+                !this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT1, "steveman0.FreightCart_T1") && 
+                !this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT2, "steveman0.FreightCart_T2") && 
+                !this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT3, "steveman0.FreightCart_T3") && 
+                !this.SearchAndSpawn(lnHopper, ItemEntries.MineCartT4, "steveman0.FreightCart_T4") &&
+                !this.SearchAndSpawn(lnHopper, orefreighterT1, "steveman0.OreFreighter_T1") &&
+                !this.SearchAndSpawn(lnHopper, orefreighterT2, "steveman0.OreFreighter_T2") &&
+                !this.SearchAndSpawn(lnHopper, orefreighterT3, "steveman0.OreFreighter_T3") &&
+                !this.SearchAndSpawn(lnHopper, orefreighterT4, "steveman0.OreFreighter_T4") &&
+                !this.SearchAndSpawn(lnHopper, scrapcart, "steveman0.ScrapCartMK1") &&
+                !this.SearchAndSpawn(lnHopper, scraporefreighter, "steveman0.ScrapOreFreighterMK1")) ++lnHopper;
         }
     }
 
