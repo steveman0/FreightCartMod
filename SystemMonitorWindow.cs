@@ -562,8 +562,6 @@ public class SystemMonitorWindow : BaseMachineWindow
                     this.manager.UpdateLabel("iteminfo" + n, iteminfo, Color.white);
             }
         }
-        else
-            this.manager.RedrawWindow();
     }
     #endregion
 
