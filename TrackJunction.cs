@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Linq;
 using System.IO;
 using System;
@@ -12,6 +13,14 @@ public class FreightTrackJunction : MachineEntity
     public FreightTrackNetwork TrackNetwork;
     public FreightTrackJunction[] ConnectedJunctions = new FreightTrackJunction[4];
     public FreightTrackSegment[] ConnectedSegments = new FreightTrackSegment[4];
+    public enum FreightTrackDirectionResults
+    {
+        Good,// To another junction
+        Bad, // Derail any cart that goes this direction
+        Trap,// Trap any cart in an infinite loop
+        Self,// Takes you back to here (may have stations that direction)
+    }
+    public FreightTrackDirectionResults[] DirectionResults = new FreightTrackDirectionResults[4];
     public int JunctionIndex = 0;
     public int JunctionID;
     public int[] SegmentDistances = new int[4];
@@ -84,22 +93,25 @@ public class FreightTrackJunction : MachineEntity
         string str = "";
         for (int n = 0; n < 4; n++)
         {
-            if (this.ConnectedJunctions[n] != null)
+            switch (this.DirectionResults [n])
             {
+            case FreightTrackDirectionResults.Good:
                 count++;
-                str += SegmentDistances[n].ToString() + ", ";
+                break;
+            case FreightTrackDirectionResults.Self:
+                str += "@";
+                break;
+            case FreightTrackDirectionResults.Trap:
+                str += "L@"; //L for Loop may be easier to understand?
+                break;
+            case FreightTrackDirectionResults.Bad:
+                str += "D@";
+                break;
             }
+            str += SegmentDistances [n].ToString () + ", ";
         }
-        if (count > 0)
-        {
-            str2 = count.ToString() + " valid track connections\n";
-            str3 = "Track lengths: " + str.Substring(0, str.Length - 2) + "\nPress Q to reset the junction\n";
-        }
-        else
-        {
-            str2 = "No valid track connections detected\n";
-            str3 = "";
-        }
+        str2 = count.ToString() + " valid track connections\n";
+        str3 = "Track lengths: " + str.Substring(0, str.Length - 2) + "\nPress Q to reset the junction\n";
         if (this.TrackNetwork != null)
         {
             str4 = "Track Network ID: " + this.TrackNetwork.NetworkID.ToString() + "\nJunction Count: " + this.TrackNetwork.TrackJunctions.Count.ToString() + "\n";
@@ -142,19 +154,26 @@ public class FreightTrackJunction : MachineEntity
         long nextY = this.mnY;
         long nextZ = this.mnZ;
         Vector3 dirvec = new Vector3();
+        bool mirrorOk = true;
 
         //Store the initial junction direction for later recording which direction the connected junction is associated with
         int initialdirection = direction;
+
+        //There are many ways to derail, so set that result now, and assume it later. Saves much repeat of these lines.
+        this.DirectionResults [initialdirection] = FreightTrackDirectionResults.Bad;
+        this.ConnectedJunctions [initialdirection] = null;
+        this.ConnectedSegments [initialdirection] = null;
 
         //List of freight cart stations found on this segment -> to be written to the final constructed FreightTrackSegment
         List<FreightCartStation> SegmentStations = new List<FreightCartStation>();
 
         //Store visited track pieces for catching when the segment enters a closed loop
-        List<TrackPiece> VisitedTracks = new List<TrackPiece>();
+        //We're only testing for a unique key here, so no Tvalue will be used.
+        StringDictionary VisitedTracks = new StringDictionary();
 
         //Begin loop here.  Direction can be set and used to check the next location each time through the loop
         //Allow segments only up to 512m long due to cost of loop checking - may revise after testing
-        for (int n = 0; n < 512; n++)
+        for (this.SegmentDistances[initialdirection] = 0; this.SegmentDistances[initialdirection] < 2048; this.SegmentDistances[initialdirection]++)
         {
             switch (direction)
             {
@@ -230,6 +249,8 @@ public class FreightTrackJunction : MachineEntity
                         return false;
                     else if (!(trackvec == dirvec) && !(trackvec == -dirvec))
                     {
+                        // Came in from the side, this path is one-way.
+                        mirrorOk = false;
                         dirvec = new Vector3(trackvec.x, 0f, trackvec.z);
                     }
                 }
@@ -267,8 +288,7 @@ public class FreightTrackJunction : MachineEntity
             {
                 if (lValue1 == CONTROLLOAD || lValue1 == CONTROLUNLOAD || lValue1 == CONTROLTURBO)
                 {
-                    if ((trackvec == dirvec) || (trackvec == -dirvec))
-                    {
+                    if ((trackvec == dirvec) || (trackvec == -dirvec)) {
                         //Do nothing... direction doesn't change
                     }
                     else
@@ -324,23 +344,33 @@ public class FreightTrackJunction : MachineEntity
                     Debug.LogWarning("Track Junction Track Follower tried to get a track junction but got other mod machine instead?");
                     return false;
                 }
+
+                //Mark this segment as a loop coming back to ourselves.
+                if (junction == this)
+                    this.DirectionResults[initialdirection] = FreightTrackDirectionResults.Self;
+                else
+                    this.DirectionResults[initialdirection] = FreightTrackDirectionResults.Good;
+
+                this.SegmentDistances[initialdirection] += 1; // We're going to exit the loop here, messing with loop variable OK'd.
                 this.ConnectedJunctions[initialdirection] = junction;
-                FreightTrackSegment tracksegment = new FreightTrackSegment(this, junction, n + 1);
+                FreightTrackSegment tracksegment = new FreightTrackSegment(this, junction, this.SegmentDistances[initialdirection]);
                 tracksegment.Stations = SegmentStations;
                 //Debug.LogWarning("trackseg station count: " + tracksegment.Stations.Count);
                 this.ConnectedSegments[initialdirection] = tracksegment;
-                this.SegmentDistances[initialdirection] = n + 1;
                 this.LinkStatusDirty = true;
 
-                //handle the connection for the other junction so we don't need to double the work
-                //Mirror the direction to reflect the correct side of the connecting junction
-                int mirroreddir = direction += 2;
-                if (mirroreddir > 3)
-                    mirroreddir -= 4;
-                junction.ConnectedJunctions[mirroreddir] = this;
-                junction.ConnectedSegments[mirroreddir] = tracksegment;
-                junction.SegmentDistances[mirroreddir] = n + 1;
-                junction.LinkStatusDirty = true;
+                //If path is bi-directional, handle the connection for the other junction so we don't need to double the work
+                if (mirrorOk) {
+                    //Mirror the direction to reflect the correct side of the connecting junction
+                    int mirroreddir = direction += 2;
+                    if (mirroreddir > 3)
+                        mirroreddir -= 4;
+                    junction.ConnectedJunctions [mirroreddir] = this;
+                    junction.ConnectedSegments [mirroreddir] = tracksegment;
+                    junction.SegmentDistances [mirroreddir] = this.SegmentDistances[initialdirection];
+                    junction.DirectionResults[mirroreddir] = this.DirectionResults[initialdirection];//Either "Good
+                    junction.LinkStatusDirty = true;
+                }
                 return true;
             }
             else if (type == TOURSTATIONTYPE)
@@ -362,8 +392,9 @@ public class FreightTrackJunction : MachineEntity
                 station.ClosestJunction = this;
                 station.JunctionDirection = initialdirection;
                 this.ConnectedJunctions[initialdirection] = this;
-                FreightTrackSegment tracksegment = new FreightTrackSegment(this, this, 2*n + 1);
-                this.SegmentDistances[initialdirection] = 2 * n + 1;
+                FreightTrackSegment tracksegment = new FreightTrackSegment(this, this, 2*this.SegmentDistances[initialdirection] + 1);
+                this.SegmentDistances[initialdirection] *= 2;
+                this.SegmentDistances[initialdirection] += 1;
                 this.ConnectedSegments[initialdirection] = tracksegment;
                 this.LinkStatusDirty = true;
                 if (!string.IsNullOrEmpty(station.StationName) && !this.TrackNetwork.TourCartStations.ContainsKey(station.StationName))
@@ -383,27 +414,23 @@ public class FreightTrackJunction : MachineEntity
             else if (dirvec == Vector3.back)
                 direction = 3;
 
-            TrackPiece visitedpiece = new TrackPiece(new Vector3(nextX - this.mnX, nextY - this.mnY, nextZ - this.mnZ), direction);
-            //Debug.LogWarning("Visited track piece: " + new Vector4(nextX - this.mnX, nextY - mnY, nextZ - mnZ, direction).ToString());
-            //Store every track piece and check every 10th for monitoring for closed, endless loops of track
-            if (n % 10 == 0)
-            {
-                int count = VisitedTracks.Count;
-                for (int m = 0; m < count; m++)
-                {
-                    TrackPiece piece = VisitedTracks[m];
-                    if (piece.Position == visitedpiece.Position && piece.Direction == visitedpiece.Direction)
-                    {
-                        //Debug.LogWarning("piece position: " + piece.Position.ToString() + " visited: " + visitedpiece.Position.ToString());
-                        Debug.LogWarning("TrackJunction followed track route and found a closed loop.  Ending search.");
-                        return false;
-                    }
-                }
+            //Store a hash of every track piece to check for getting stuck in endless loops.
+            //HACK Construct a string to be our HashTable Key.
+            //We could implement a fancy struct or something, but this works, and we don't have to make a custom GetHashTag function
+            //(Struct.gethash() is apparently very inefficient)
+            //And the try/catch construct means we only do one hash lookup even.
+            try{
+                //Build a string which will be unique for this particular track segment and travel direction. Lots and Lots of implicit casting to string on this line.
+                VisitedTracks.Add ((nextX - this.mnX) + "," + (nextY - this.mnY) + "," + (nextZ - this.mnZ) + "," + direction, null);
             }
-            VisitedTracks.Add(visitedpiece);
-            if (n == 511)
-                Debug.LogWarning("Track Junction Found track length > 512m -> ending search.");
+            catch{
+                Debug.LogWarning ("TrackJunction followed track route and found an infinite loop. Ending search.");
+                this.DirectionResults [initialdirection] = FreightTrackDirectionResults.Trap;
+                return false;
+            }
+
         }
+        Debug.LogWarning("Track Junction Found track length > 512m -> ending search.");
         return false;
     }
 
