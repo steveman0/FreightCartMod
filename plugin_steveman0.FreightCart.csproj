@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -12,62 +12,56 @@
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
+    <OutputPath>..\..\.local\share\Steam\steamapps\workshop\content\254200\728489255\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
+  <PropertyGroup>
+    <OutputPath>~\src\FreightCartMod</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <Optimize>true</Optimize>
+    <OutputPath>..\..\.local\share\Steam\steamapps\workshop\content\254200\728489255\</OutputPath>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Assembly-CSharp, Version=0.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\Games\Steam\steamapps\common\FortressCraft\64\FC_64_Data\Managed\Assembly-CSharp.dll</HintPath>
-    </Reference>
-    <Reference Include="Assembly-CSharp-firstpass, Version=0.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\Games\Steam\steamapps\common\FortressCraft\64\FC_64_Data\Managed\Assembly-CSharp-firstpass.dll</HintPath>
-    </Reference>
     <Reference Include="Assembly-UnityScript">
-      <HintPath>..\plugin_steveman0.MSManufacturer\bin\Debug\Assembly-UnityScript.dll</HintPath>
+      <HintPath>..\Managed\Assembly-UnityScript.dll</HintPath>
     </Reference>
     <Reference Include="Assembly-UnityScript-firstpass">
-      <HintPath>..\plugin_steveman0.MSManufacturer\bin\Debug\Assembly-UnityScript-firstpass.dll</HintPath>
-    </Reference>
-    <Reference Include="FCECommunityTools, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\FCECommunity-Tools-source\bin\Debug\FCECommunityTools.dll</HintPath>
+      <HintPath>..\Managed\Assembly-UnityScript-firstpass.dll</HintPath>
     </Reference>
     <Reference Include="System" />
-    <Reference Include="System.Core" />
+    <Reference Include="System.Core">
+      <HintPath>..\..\..\..\usr\lib\mono\4.5\System.Core.dll</HintPath>
+    </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
-    <Reference Include="UnityEngine, Version=0.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\Games\Steam\steamapps\common\FortressCraft\64\FC_64_Data\Managed\UnityEngine.dll</HintPath>
-    </Reference>
     <Reference Include="UnityEngine.Networking">
-      <HintPath>..\..\Games\Steam\steamapps\common\FortressCraft\64\FC_64_Data\Managed\UnityEngine.Networking.dll</HintPath>
+      <HintPath>..\Managed\UnityEngine.Networking.dll</HintPath>
     </Reference>
-    <Reference Include="UnityEngine.UI, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\Games\Steam\steamapps\common\FortressCraft\64\FC_64_Data\Managed\UnityEngine.UI.dll</HintPath>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>..\Managed\Assembly-CSharp.dll</HintPath>
     </Reference>
-    <Reference Include="UnityScript.Lang, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\Games\Steam\steamapps\common\FortressCraft\64\FC_64_Data\Managed\UnityScript.Lang.dll</HintPath>
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>..\Managed\Assembly-CSharp-firstpass.dll</HintPath>
+    </Reference>
+    <Reference Include="FCECommunityTools">
+      <HintPath>..\Managed\FCECommunityTools.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>..\Managed\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>..\Managed\UnityEngine.UI.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityScript.Lang">
+      <HintPath>..\Managed\UnityScript.Lang.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
@@ -80,14 +74,12 @@
     <Compile Include="FreightCartStation.cs" />
     <Compile Include="FreightCartUnity.cs" />
     <Compile Include="FreightCartWindow.cs" />
-    <Compile Include="FreightRegistry.cs" />
     <Compile Include="FreightSystemMonitor.cs" />
     <Compile Include="FreightTrackNetwork.cs" />
     <Compile Include="FreightTrackSegment.cs" />
     <Compile Include="IFixedSizePriorityQueue.cs" />
     <Compile Include="IPriorityQueue.cs" />
     <Compile Include="MassInventory.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SimplePriorityQueue.cs" />
     <Compile Include="StablePriorityQueue.cs" />
     <Compile Include="StablePriorityQueueNode.cs" />
@@ -95,6 +87,20 @@
     <Compile Include="TourCartStation.cs" />
     <Compile Include="TourStationWindow.cs" />
     <Compile Include="TrackJunction.cs" />
+    <Compile Include="FreightInterfaceContainer.cs" />
+    <Compile Include="TrackJunctionWindow.cs" />
+    <Compile Include="ScrapTrack.cs" />
+    <Compile Include="NetworkSync.cs" />
+    <Compile Include="JunctionRenderer.cs" />
+    <Compile Include="HopperFreightContainer.cs" />
+    <Compile Include="FreightSaveManager.cs" />
+    <Compile Include="FreightSystemInterface.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Properties\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="FreightRegistry.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
