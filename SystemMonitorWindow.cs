@@ -9,6 +9,7 @@ public class SystemMonitorWindow : BaseMachineWindow
 {
     public const string InterfaceName = "steveman0.SystemMonitorWindow";
     public const string InterfaceNetStatus = "RequestNetStatus";
+    public const string InterfaceTrackSystems = "RequestTrackSystems";
 
     private bool dirty;
     public static bool networkredraw;
@@ -80,7 +81,7 @@ public class SystemMonitorWindow : BaseMachineWindow
                 this.SpawnNetworkSelection();
                 break;
             case WindowTypes.TrackNetworks:
-                this.SpawnTrackNetworks();
+                this.SpawnTrackNetworks(monitor);
                 break;
             case WindowTypes.GlobalInventory:
                 this.SpawnGlobalInventory();
@@ -111,6 +112,8 @@ public class SystemMonitorWindow : BaseMachineWindow
         float x = GenericMachinePanelScript.instance.Label_Holder.transform.position.x;
         float y = GenericMachinePanelScript.instance.Label_Holder.transform.position.y;
         GenericMachinePanelScript.instance.Label_Holder.transform.position = new Vector3(x, y, 69.3f);
+
+        GenericMachinePanelScript.instance.Scroll_Bar.GetComponent<UIScrollBar>().scrollValue = 0.0f;
 
         this.firstopen = true;
     }
@@ -189,7 +192,7 @@ public class SystemMonitorWindow : BaseMachineWindow
         }
     }
 
-    private void SpawnTrackNetworks()
+    private void SpawnTrackNetworks(FreightSystemMonitor monitor)
     {
         this.manager.SetTitle("Track Systems");
         this.manager.AddButton("allnetworks", "Global Inventory", buttonx2, 0);
@@ -208,159 +211,181 @@ public class SystemMonitorWindow : BaseMachineWindow
         int invxicon = cartxicon + 50;
         int invlabel = invxicon + 65;
 
-        int networkcount = FreightCartManager.instance.GlobalTrackNetworks.Count;
+        if (NetworkSync.TrackNetworks == null)
+            SystemMonitorWindow.RequestTrackNetworks(this.TrackNetworkDisplay, this.StationDisplay, this.CartDisplay, WorldScript.mLocalPlayer, monitor);
 
-        if (networkcount == 0)
-            this.manager.AddBigLabel("notracknetworks", "No track networks found...", Color.red, 225, 150);
-        else
+        //int networkcount = FreightCartManager.instance.GlobalTrackNetworks.Count;
+
+        if (NetworkSync.TrackNetworks != null && NetworkSync.TrackNetworks.NetworkCount > 0)
         {
-            string trackicon = "Track Straight";
-            string stationicon = "Minecart Load";
-            for (int n = 0; n < networkcount; n++)
+            for (int n = 0; n < NetworkSync.TrackNetworks.NetworkCount; n++)
             {
-                FreightTrackNetwork network = FreightCartManager.instance.GlobalTrackNetworks[n];
+                TrackNetworkStats network = NetworkSync.TrackNetworks.NetworkStats[n];
                 if (network == null)
                     continue;
-                int junctioncount = network.TrackJunctions.Count;
-                int networkID = network.NetworkID;
-                int assignedcarts;
-                int availcarts;
-                network.GetNetworkStats(out assignedcarts, out availcarts);
+                this.DisplayTrackNetworks(network, n, ref ycursor, trackiconx, trackxoffset, tracklabel);
 
-                this.manager.AddIcon("trackicon" + n, trackicon, Color.white, trackiconx, ycursor);
-                this.manager.AddBigLabel("trackjunctions" + n, "ID: " + network.NetworkID.ToString() + "   " + junctioncount.ToString() + " Junctions   Carts: ", Color.white, trackxoffset, ycursor);
-                this.manager.AddBigLabel("trackcarts" + n, availcarts.ToString() + " / " + assignedcarts.ToString(), availcarts > assignedcarts ? Color.green : availcarts == assignedcarts ? Color.white : Color.red, tracklabel, ycursor);
-                ycursor += 60;
                 if (this.TrackNetworkDisplay == n)
                 {
-                    List<FreightCartStation> stations = network.GetNetworkStations();
-                    stations = stations.OrderBy(x => x.StationName).ToList();
-                    int stationcount = stations.Count;
-                    Debug.LogWarning("FSM Station Count: " + stationcount.ToString());
-                    for (int m = 0; m < stationcount; m++)
+                    List<StationStats> stations = NetworkSync.TrackNetworks.Stations;
+                    for (int m = 0; m < NetworkSync.TrackNetworks.StationCount; m++)
                     {
-                        FreightCartStation station = stations[m];
-                        int stationavail = station.AvailableCarts;
-                        int stationassigned = station.AssignedCarts;
-                        this.manager.AddIcon("stationicon" + m, stationicon, Color.white, stationxicon, ycursor);
-                        this.manager.AddBigLabel("stationnetwork" + m, (!string.IsNullOrEmpty(station.StationName) ? station.StationName : "UNNAMED") + " - " + station.NetworkID, station.StationFull <= 0 ? Color.white : Color.red, stationlabel, ycursor);
-                        this.manager.AddBigLabel("stationcarts" + m, "Carts: " + stationavail.ToString() + " / " + stationassigned.ToString(), stationavail > stationassigned ? Color.green : stationavail == stationassigned ? Color.white : Color.red, stationlabel + 350, ycursor);
-                        ycursor += 60;
+                        StationStats station = NetworkSync.TrackNetworks.Stations[m];
+                        this.DisplayStation(station, m, ref ycursor, stationxicon, stationlabel);
+
                         if (this.StationDisplay == m)
                         {
-                            this.manager.AddButton("addcart", "Add Cart", stationlabel + 475, ycursor - 60);
-                            this.manager.AddButton("removecart", "Remove Cart", stationlabel + 475, ycursor - 10);
-                            this.CurrentStation = station;
+                            // How do I network this? ...
+                            //this.manager.AddButton("addcart", "Add Cart", stationlabel + 475, ycursor - 60);
+                            //this.manager.AddButton("removecart", "Remove Cart", stationlabel + 475, ycursor - 10);
+                            //this.CurrentStation = station;
 
+                            //List<FreightRegistry> LocalDeficits = new List<FreightRegistry>();
+                            //List<FreightRegistry> LocalSurplus = new List<FreightRegistry>();
+                            //if (station.massStorageCrate != null)
+                            //{
+                            //    LocalDeficits = FreightCartManager.instance.GetLocalDeficit(station.NetworkID, station.massStorageCrate);
+                            //    LocalSurplus = FreightCartManager.instance.GetLocalSurplus(station.NetworkID, station.massStorageCrate);
+                            //}
+                            //else if (station.HopperInterface != null)
+                            //{
+                            //    LocalDeficits = this.FreightListingConversion(station.HopperInterface.FreightRequests.OrderByDescending(x => x.Quantity).Take(3).ToList());
+                            //    LocalSurplus = this.FreightListingConversion(station.HopperInterface.FreightOfferings.OrderByDescending(x => x.Quantity).Take(3).ToList());
+                            //}
+                            //else if (station.AttachedInterface != null)
+                            //{
+                            //    LocalDeficits = this.FreightListingConversion(station.AttachedInterface.FreightRequests.OrderByDescending(x => x.Quantity).Take(3).ToList());
+                            //    LocalSurplus = this.FreightListingConversion(station.AttachedInterface.FreightOfferings.OrderByDescending(x => x.Quantity).Take(3).ToList());
+                            //}
+                            this.DisplayDefSur(ref ycursor, stationlabel);
 
-                            List<FreightRegistry> LocalDeficits = new List<FreightRegistry>();
-                            List<FreightRegistry> LocalSurplus = new List<FreightRegistry>();
-                            if (station.massStorageCrate != null)
+                            for (int p = 0; p < NetworkSync.TrackNetworks.CartCount; p++)
                             {
-                                LocalDeficits = FreightCartManager.instance.GetLocalDeficit(station.NetworkID, station.massStorageCrate);
-                                LocalSurplus = FreightCartManager.instance.GetLocalSurplus(station.NetworkID, station.massStorageCrate);
-                            }
-                            else if (station.HopperInterface != null)
-                            {
-                                LocalDeficits = this.FreightListingConversion(station.HopperInterface.FreightRequests.OrderByDescending(x => x.Quantity).Take(3).ToList());
-                                LocalSurplus = this.FreightListingConversion(station.HopperInterface.FreightOfferings.OrderByDescending(x => x.Quantity).Take(3).ToList());
-                            }
-                            else if (station.AttachedInterface != null)
-                            {
-                                LocalDeficits = this.FreightListingConversion(station.AttachedInterface.FreightRequests.OrderByDescending(x => x.Quantity).Take(3).ToList());
-                                LocalSurplus = this.FreightListingConversion(station.AttachedInterface.FreightOfferings.OrderByDescending(x => x.Quantity).Take(3).ToList());
-                            }
-                            ycursor -= 20;
-                            string str = "";
-                            int shifter = 1;
-                            int ind2 = 0;
-                            if (LocalDeficits.Count <= 0)
-                                this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef", "This storage is fully stocked!", Color.white, false, stationlabel, ycursor);
-                            else
-                                this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef", "Top requests for this storage:", Color.white, false, stationlabel, ycursor);
-                            ycursor += 20;
-                            for (int index = 0; index < LocalDeficits.Count; index++)
-                            {
-                                if (LocalDeficits[index].Deficit != 0)
-                                {
-                                    str = (index + 1).ToString() + ") " + LocalDeficits[index].Deficit.ToString("N0") + "x " + ItemManager.GetItemName(LocalDeficits[index].FreightItem) + "\n";
-                                    this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef" + index, str, Color.white, false, stationlabel, ycursor);
-                                    ycursor += 20;
-                                }
-                                shifter++;
-                            }
-                            ycursor -= 20 * shifter;
-                            if (LocalSurplus.Count <= 0)
-                                this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur", "This storage has nothing to offer!", Color.white, false, stationlabel + 250, ycursor);
-                            else
-                                this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur", "Top offerings for this storage:", Color.white, false, stationlabel + 250, ycursor);
-                            ycursor += 20;
-                            for (int index = 0; index < LocalSurplus.Count; index++)
-                            {
-                                if (LocalSurplus[index].Surplus != 0)
-                                {
-                                    str = (index + 1).ToString() + ") " + LocalSurplus[index].Surplus.ToString("N0") + "x " + ItemManager.GetItemName(LocalSurplus[index].FreightItem) + "\n";
-                                    this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur" + index, str, Color.white, false, stationlabel + 250, ycursor);
-                                    ycursor += 20;
-                                }
-                                ind2 = index;
-                            }
-                            if (ind2 > (shifter - 2))
-                                ycursor += 20;
-                            else
-                                ycursor += (shifter - 1 - ind2) * 20 + 20;
-
-                            int cartcount = station.CartList.Count;
-                            for (int p = 0; p < cartcount; p++)
-                            {
-                                FreightCartMob cart = station.CartList[p];
-
-                                int itemID = ItemEntries.MineCartT1;
-                                if (cart.meType == FreightCartMob.eMinecartType.FreightCartMK1)
-                                    itemID = ModManager.mModMappings.ItemsByKey["steveman0.FreightCartMK1"].ItemId;
-                                else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T1 || cart.meType == FreightCartMob.eMinecartType.OreFreighter_T1)
-                                    itemID = ItemEntries.MineCartT1;
-                                else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T2 || cart.meType == FreightCartMob.eMinecartType.OreFreighter_T2)
-                                    itemID = ItemEntries.MineCartT2;
-                                else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T3 || cart.meType == FreightCartMob.eMinecartType.OreFreighter_T3)
-                                    itemID = ItemEntries.MineCartT3;
-                                else if (cart.meType == FreightCartMob.eMinecartType.FreightCart_T4 || cart.meType == FreightCartMob.eMinecartType.OreFreighter_T4)
-                                    itemID = ItemEntries.MineCartT4;
-                                else if (cart.meType == FreightCartMob.eMinecartType.FreightCartTour)
-                                    itemID = ItemEntries.TourCart;
-                                string carticon = ItemManager.GetItemIcon(itemID);
-
-                                this.manager.AddIcon("carticon" + p, carticon, Color.white, cartxicon, ycursor);
-                                this.manager.AddBigLabel("cartlabel" + p, "Inventory: " + cart.mnUsedStorage.ToString() + "/" + cart.mnMaxStorage.ToString(), Color.white, cartlabel, ycursor);
-                                ycursor += 60;
+                                CartStats cart = NetworkSync.TrackNetworks.Carts[p];
+                                this.DisplayCart(cart, p, ref ycursor, cartlabel, cartxicon);
+                                
                                 if (p == CartDisplay)
                                 {
-                                    MachineInventory inv = null;
-                                    if (!string.IsNullOrEmpty(station.NetworkID) && cart.LocalInventory.ContainsKey(station.NetworkID))
-                                        inv = cart.LocalInventory[station.NetworkID];
-                                    if (inv == null || inv.ItemCount() == 0)
-                                    {
-                                        this.manager.AddBigLabel("invlabelempty", "No goods from this station", Color.white, invxicon + 15, ycursor);
-                                        ycursor += 60;
-                                    }
-                                    else
-                                    {
-                                        int invcount = inv.Inventory.Count;
-                                        for (int q = 0; q < invcount; q++)
-                                        {
-                                            ItemBase item = inv.Inventory[q];
-                                            string invicon = ItemManager.GetItemIcon(item);
-                                            this.manager.AddIcon("invicon" + q, invicon, Color.white, invxicon, ycursor);
-                                            this.manager.AddBigLabel("invlabel" + q, item.ToString(), Color.white, invlabel, ycursor);
-                                            ycursor += 60;
-                                        }
-                                    }
+                                    this.DisplayCartInventory(cart, ref ycursor, invxicon, invlabel);
                                 }
                             }
                         }
                     }
                     //Insert Tour cart staion listing here
                 }
+            }
+        }
+        else if (WorldScript.mbIsServer || (NetworkSync.TrackNetworks != null && NetworkSync.TrackNetworks.NetworkCount == 0))
+        {
+            this.manager.AddBigLabel("notracknetworks", "No track networks found...", Color.red, 225, 150);
+        }
+        else
+        {
+            this.manager.AddBigLabel("notracknetworks", "Waiting for server...", Color.red, 225, 150);
+        }
+    }
+
+    private void DisplayTrackNetworks(TrackNetworkStats network, int n, ref int ycursor, int trackiconx, int trackxoffset, int tracklabel)
+    {
+        this.manager.AddIcon("trackicon" + n, "Track Straight", Color.white, trackiconx, ycursor);
+        this.manager.AddBigLabel("trackjunctions" + n, "ID: " + network.NetworkID.ToString() + "   " + network.JunctionCount.ToString() + " Junctions   Carts: ", network.NetworkClosed ? Color.white : Color.red, trackxoffset, ycursor);
+        this.manager.AddBigLabel("trackcarts" + n, network.AvailableCarts.ToString() + " / " + network.AssignedCarts.ToString(), network.AvailableCarts > network.AssignedCarts ? Color.green : network.AvailableCarts == network.AssignedCarts ? Color.white : Color.red, tracklabel, ycursor);
+        ycursor += 60;
+    }
+
+    private void DisplayStation(StationStats station, int m, ref int ycursor, int stationxicon, int stationlabel)
+    {
+        int stationavail = station.AvailableCarts;
+        int stationassigned = station.AssignedCarts;
+        this.manager.AddIcon("stationicon" + m, "Minecart Load", Color.white, stationxicon, ycursor);
+        this.manager.AddBigLabel("stationnetwork" + m, (!string.IsNullOrEmpty(station.StationName) ? station.StationName : "UNNAMED") + " - " + station.NetworkID, station.StationFull <= 0 ? Color.white : Color.red, stationlabel, ycursor);
+        this.manager.AddBigLabel("stationcarts" + m, "Carts: " + stationavail.ToString() + " / " + stationassigned.ToString(), stationavail > stationassigned ? Color.green : stationavail == stationassigned ? Color.white : Color.red, stationlabel + 350, ycursor);
+        ycursor += 60;
+    }
+
+    private void DisplayDefSur(ref int ycursor, int stationlabel)
+    {
+        ycursor -= 20;
+        string str = "";
+        int shifter = 1;
+        int ind2 = 0;
+        if (NetworkSync.TrackNetworks.StationDeficits.Count <= 0)
+            this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef", "This storage is fully stocked!", Color.white, false, stationlabel, ycursor);
+        else
+            this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef", "Top requests for this storage:", Color.white, false, stationlabel, ycursor);
+        ycursor += 20;
+        for (int index = 0; index < NetworkSync.TrackNetworks.StationDeficits.Count; index++)
+        {
+            if (NetworkSync.TrackNetworks.StationDeficits[index].Deficit != 0)
+            {
+                str = (index + 1).ToString() + ") " + NetworkSync.TrackNetworks.StationDeficits[index].Deficit.ToString("N0") + "x " + ItemManager.GetItemName(NetworkSync.TrackNetworks.StationDeficits[index].FreightItem) + "\n";
+                this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localdef" + index, str, Color.white, false, stationlabel, ycursor);
+                ycursor += 20;
+            }
+            shifter++;
+        }
+        ycursor -= 20 * shifter;
+        if (NetworkSync.TrackNetworks.StationSurplus.Count <= 0)
+            this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur", "This storage has nothing to offer!", Color.white, false, stationlabel + 250, ycursor);
+        else
+            this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur", "Top offerings for this storage:", Color.white, false, stationlabel + 250, ycursor);
+        ycursor += 20;
+        for (int index = 0; index < NetworkSync.TrackNetworks.StationSurplus.Count; index++)
+        {
+            if (NetworkSync.TrackNetworks.StationSurplus[index].Surplus != 0)
+            {
+                str = (index + 1).ToString() + ") " + NetworkSync.TrackNetworks.StationSurplus[index].Surplus.ToString("N0") + "x " + ItemManager.GetItemName(NetworkSync.TrackNetworks.StationSurplus[index].FreightItem) + "\n";
+                this.manager.AddLabel(GenericMachineManager.LabelType.OneLineFullWidth, "localsur" + index, str, Color.white, false, stationlabel + 250, ycursor);
+                ycursor += 20;
+            }
+            ind2 = index;
+        }
+        if (ind2 > (shifter - 2))
+            ycursor += 20;
+        else
+            ycursor += (shifter - 1 - ind2) * 20 + 20;
+    }
+
+    private void DisplayCart(CartStats cart, int p, ref int ycursor, int cartlabel, int cartxicon)
+    {
+        int itemID = ItemEntries.MineCartT1;
+        if (cart.CartType == FreightCartMob.eMinecartType.FreightCartMK1)
+            itemID = ModManager.mModMappings.ItemsByKey["steveman0.FreightCartMK1"].ItemId;
+        else if (cart.CartType == FreightCartMob.eMinecartType.FreightCart_T1 || cart.CartType == FreightCartMob.eMinecartType.OreFreighter_T1)
+            itemID = ItemEntries.MineCartT1;
+        else if (cart.CartType == FreightCartMob.eMinecartType.FreightCart_T2 || cart.CartType == FreightCartMob.eMinecartType.OreFreighter_T2)
+            itemID = ItemEntries.MineCartT2;
+        else if (cart.CartType == FreightCartMob.eMinecartType.FreightCart_T3 || cart.CartType == FreightCartMob.eMinecartType.OreFreighter_T3)
+            itemID = ItemEntries.MineCartT3;
+        else if (cart.CartType == FreightCartMob.eMinecartType.FreightCart_T4 || cart.CartType == FreightCartMob.eMinecartType.OreFreighter_T4)
+            itemID = ItemEntries.MineCartT4;
+        else if (cart.CartType == FreightCartMob.eMinecartType.FreightCartTour)
+            itemID = ItemEntries.TourCart;
+        string carticon = ItemManager.GetItemIcon(itemID);
+
+        this.manager.AddIcon("carticon" + p, carticon, Color.white, cartxicon, ycursor);
+        this.manager.AddBigLabel("cartlabel" + p, "Inventory: " + cart.UsedStorage.ToString() + "/" + cart.MaxStorage.ToString(), Color.white, cartlabel, ycursor);
+        ycursor += 60;
+    }
+
+    private void DisplayCartInventory(CartStats cart, ref int ycursor, int invxicon, int invlabel)
+    {
+        List<ItemBase> inv = NetworkSync.TrackNetworks.CartInventory;
+        if (inv == null || inv.Count == 0)
+        {
+            this.manager.AddBigLabel("invlabelempty", "No goods from this station", Color.white, invxicon + 15, ycursor);
+            ycursor += 60;
+        }
+        else
+        {
+            int invcount = inv.Count;
+            for (int q = 0; q < invcount; q++)
+            {
+                ItemBase item = inv[q];
+                string invicon = ItemManager.GetItemIcon(item);
+                this.manager.AddIcon("invicon" + q, invicon, Color.white, invxicon, ycursor);
+                this.manager.AddBigLabel("invlabel" + q, item.ToString(), Color.white, invlabel, ycursor);
+                ycursor += 60;
             }
         }
     }
@@ -710,6 +735,7 @@ public class SystemMonitorWindow : BaseMachineWindow
                     this.TrackNetworkDisplay = slotNum;
                 this.StationDisplay = -1;
                 this.CartDisplay = -1;
+                NetworkSync.TrackNetworks = null;
                 this.manager.RedrawWindow();
                 return true;
             }
@@ -727,6 +753,7 @@ public class SystemMonitorWindow : BaseMachineWindow
                     this.StationDisplay = slotNum;
                 this.CartDisplay = -1;
                 this.manager.ClearWindow();
+                NetworkSync.TrackNetworks = null;
                 this.manager.RedrawWindow();
                 return true;
             }
@@ -742,6 +769,7 @@ public class SystemMonitorWindow : BaseMachineWindow
                     this.CartDisplay = -1;
                 else
                     this.CartDisplay = slotNum;
+                NetworkSync.TrackNetworks = null;
                 this.manager.RedrawWindow();
                 return true;
             }
@@ -841,6 +869,7 @@ public class SystemMonitorWindow : BaseMachineWindow
         this.TrackNetworkDisplay = -1;
         this.StationDisplay = -1;
         this.CartDisplay = -1;
+        NetworkSync.TrackNetworks = null;
 
         base.OnClose(targetEntity);
     }
@@ -859,6 +888,14 @@ public class SystemMonitorWindow : BaseMachineWindow
             NetworkManager.instance.SendInterfaceCommand(InterfaceName, InterfaceNetStatus, netindex.ToString(), null, monitor, 0f);
     }
 
+    public static void RequestTrackNetworks(int tracknetwork, int station, int cart, Player player, FreightSystemMonitor monitor)
+    {
+        if (WorldScript.mbIsServer)
+            NetworkSync.GetTrackNetworks(tracknetwork, station, cart, player);
+        else
+            NetworkManager.instance.SendInterfaceCommand(InterfaceName, InterfaceTrackSystems, tracknetwork.ToString() + "," + station.ToString() + "," + cart.ToString(), null, monitor, 0f);
+    }
+
     public static NetworkInterfaceResponse HandleNetworkCommand(Player player, NetworkInterfaceCommand nic)
     {
         FreightSystemMonitor monitor = nic.target as FreightSystemMonitor;
@@ -871,6 +908,20 @@ public class SystemMonitorWindow : BaseMachineWindow
                 int Netindex = 0;
                 int.TryParse(nic.payload ?? "-1", out Netindex);
                 SystemMonitorWindow.RequestNetworkStatus(Netindex, player, monitor);
+            }
+            else if (command == InterfaceTrackSystems)
+            {
+                int tracknetwork = -1;
+                int station = -1;
+                int cart = -1;
+                string[] output = nic.payload.Split(',');
+                if (output.Length > 2)
+                {
+                    int.TryParse(output[0] ?? "-1", out tracknetwork);
+                    int.TryParse(output[1] ?? "-1", out station);
+                    int.TryParse(output[2] ?? "-1", out cart);
+                }
+                SystemMonitorWindow.RequestTrackNetworks(tracknetwork, station, cart, player, monitor);
             }
         }
 

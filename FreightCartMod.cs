@@ -43,9 +43,10 @@ public class FreightCartMod : FortressCraftMod
         modRegistrationData.RegisterEntityUI("steveman0.FreightCartStation", new FreightCartWindow());
         modRegistrationData.RegisterEntityUI("steveman0.FreightSystemMonitor", new SystemMonitorWindow());
         modRegistrationData.RegisterServerComms("steveman0.NetworkStatus", NetworkSync.SendNetworkStatus, NetworkSync.ReadNetworkStatus);
+        modRegistrationData.RegisterServerComms("steveman0.TrackNetworks", NetworkSync.SendTrackNetworks, NetworkSync.ReadTrackNetworks);
 
-        UIManager.NetworkCommandFunctions.Add("steveman0.FreightCartWindow", new UIManager.HandleNetworkCommand(FreightCartWindow.HandleNetworkCommand));
-        UIManager.NetworkCommandFunctions.Add("steveman0.TrackJunctionWindow", new UIManager.HandleNetworkCommand(TrackJunctionWindow.HandleNetworkCommand));
+        UIManager.NetworkCommandFunctions.Add(FreightCartWindow.InterfaceName, new UIManager.HandleNetworkCommand(FreightCartWindow.HandleNetworkCommand));
+        UIManager.NetworkCommandFunctions.Add(TrackJunctionWindow.InterfaceName, new UIManager.HandleNetworkCommand(TrackJunctionWindow.HandleNetworkCommand));
         UIManager.NetworkCommandFunctions.Add(TourStationWindow.InterfaceName, new UIManager.HandleNetworkCommand(TourStationWindow.HandleNetworkCommand));
         UIManager.NetworkCommandFunctions.Add(SystemMonitorWindow.InterfaceName, new UIManager.HandleNetworkCommand(SystemMonitorWindow.HandleNetworkCommand));
 

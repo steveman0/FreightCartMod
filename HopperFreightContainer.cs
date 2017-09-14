@@ -107,5 +107,18 @@ public class HopperFreightContainer : FreightSystemInterface
     {
         return Machine.TryInsert(Station, item);
     }
+
+    public bool FreightDataRequest
+    {
+        get
+        {
+            return false;
+        }
+    }
+
+    public void FreightNetworkData(List<FreightData> data)
+    {
+        return;
+    }
 }
 

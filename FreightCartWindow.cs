@@ -72,10 +72,10 @@ public class FreightCartWindow : BaseMachineWindow
             this.manager.AddButton("increasecarts", "Add Cart", 175, 260);
             this.manager.AddButton("toggleload", "Toggle Load", 25, 315);
             this.manager.AddButton("toggleoffer", "Toggle Offers", 25, 370);
-            this.manager.AddButton("togglecarttier", "Toggle Tier", 25, 425);
+            this.manager.AddButton("togglecarttier", "Toggle Tier", 100, 425);
             this.manager.AddBigLabel("loadstatus", "Wait for " + (station.mbWaitForFullLoad ? "Full" : "Any"), Color.white, 165, 315);
             this.manager.AddBigLabel("offerlabel", (station.OfferAll ? "Offer All" : "Use Offer List"), Color.white, 165, 370);
-            this.manager.AddBigLabel("carttier", "Cart Tier: " + station.CartTierLabel(), Color.white, 165, 425);
+            this.manager.AddBigLabel("carttier", "Cart Tier: " + station.CartTierLabel(), Color.white, 25, 480);
 
         }
         else if (SetFreightItems && !ItemSearchWindow && !SetNetworkID && !SetName && !SetInventoryName && !string.IsNullOrEmpty(station.NetworkID))

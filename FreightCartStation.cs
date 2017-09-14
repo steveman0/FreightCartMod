@@ -464,7 +464,17 @@ public class FreightCartStation : MachineEntity
         }
         if (HopperInterface == null && AttachedInterface == null)
             this.MassStorageChecks();
-
+        else if (this.AttachedInterface != null)
+        {
+            if (this.AttachedInterface.FreightDataRequest)
+                this.AttachedInterface.FreightNetworkData(FreightCartManager.instance.GetInterfaceNetworkData(this.NetworkID));
+        }
+        if (this.HopperInterface != null)
+        {
+            SegmentEntity machine = (SegmentEntity)this.HopperInterface.Machine;
+            if (machine == null || machine.mbDelete)
+                this.HopperInterface = null;
+        }
         this.mrCartOnUs -= LowFrequencyThread.mrPreviousUpdateTimeStep;
         this.StationFull -= LowFrequencyThread.mrPreviousUpdateTimeStep;
     }

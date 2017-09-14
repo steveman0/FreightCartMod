@@ -14,9 +14,9 @@ public class FreightCartManager
     public FreightCartStation CopiedFreightStation;
     public List<MassInventory> StationInventories;
     public List<FreightInterfaceContainer> FreightInterfaces;
-    public List<MassInventory> OldDeficits;
-    public List<MassInventory> NetworkStock;
-    public List<MassInventory> NetworkDeficit;
+    //public List<MassInventory> OldDeficits;
+    //public List<MassInventory> NetworkStock;
+    //public List<MassInventory> NetworkDeficit;
     public List<KeyValuePair<ItemBase, int>> GlobalInventory;
     public List<FreightTrackNetwork> GlobalTrackNetworks = new List<FreightTrackNetwork>();
     public List<string> Networks;
@@ -30,11 +30,11 @@ public class FreightCartManager
         SystemMonitorWindow.fcm = this;
         this.MasterRegistry = new List<FreightRegistry>();
         this.InterfaceMaster = new List<FreightRegistry>();
-        this.NetworkStock = new List<MassInventory>();
-        this.NetworkDeficit = new List<MassInventory>();
+        //this.NetworkStock = new List<MassInventory>();
+        //this.NetworkDeficit = new List<MassInventory>();
         this.StationInventories = new List<MassInventory>();
         this.FreightInterfaces = new List<FreightInterfaceContainer>();
-        this.OldDeficits = new List<MassInventory>();
+        //this.OldDeficits = new List<MassInventory>();
         this.Networks = new List<string>();
         this.GlobalInventory = new List<KeyValuePair<ItemBase, int>>();
         //GameObject Sync = new GameObject("ManagerSync");
@@ -221,17 +221,17 @@ public class FreightCartManager
         }
     }
 
-    public List<FreightRegistry> GetNetworkRegistries(int networkindex)
+    public List<FreightRegistry> GetNetworkRegistries(string networkid)
     {
         IEnumerable<FreightRegistry> registries = new List<FreightRegistry>();
         IEnumerable<FreightRegistry> Interreg = new List<FreightRegistry>();
         lock (RegistryLock)
         {
-            registries = this.MasterRegistry.FindAll(x => x.NetworkID == this.Networks[networkindex] && x.DataType == FreightRegistry.RegistryType.NetworkData);
+            registries = this.MasterRegistry.FindAll(x => x.NetworkID == networkid && x.DataType == FreightRegistry.RegistryType.NetworkData);
         }
         lock (InterfaceLock)
         {
-            Interreg = this.InterfaceMaster.FindAll(x => x.NetworkID == this.Networks[networkindex] && x.DataType == FreightRegistry.RegistryType.NetworkData);
+            Interreg = this.InterfaceMaster.FindAll(x => x.NetworkID == networkid && x.DataType == FreightRegistry.RegistryType.NetworkData);
         }
         // Might be horrifically slow but this method is only ever called in the freight system monitor UI
         List<FreightRegistry> newregs = new List<FreightRegistry>();
@@ -259,8 +259,24 @@ public class FreightCartManager
             if (!newregs.Exists(x => x.FreightItem.Compare(reg.FreightItem)))
                 newregs.Add(reg);
         }
-        Debug.Log("NetworkRegistries for network " + this.Networks[networkindex] + " total count is: " + newregs.Count);
+        //Debug.Log("NetworkRegistries for network " + this.Networks[networkindex] + " total count is: " + newregs.Count);
         return newregs;
+    }
+
+    /// <summary>
+    /// Packages freight data into simple container to pass to the FreightSystemInterface on request
+    /// </summary>
+    /// <param name="networkid"></param>
+    /// <returns></returns>
+    public List<FreightData> GetInterfaceNetworkData(string networkid)
+    {
+        if (string.IsNullOrEmpty(networkid))
+            return new List<FreightData>();
+        List<FreightRegistry> regs = this.GetNetworkRegistries(networkid);
+        List<FreightData> data = new List<FreightData>(regs.Count);
+        foreach (FreightRegistry reg in regs)
+            data.Add(new FreightData(reg.FreightItem, reg.Inventory, reg.Deficit, reg.Surplus, reg.Stock));
+        return data;
     }
 
     public bool IsRegistered(FreightCartStation station)
@@ -527,19 +543,19 @@ public class FreightCartManager
     }
 
 
-    //For reducing the mass storage quantity as carts draw from it (between refreshes)
-    public void StorageRemove(MassInventory inventory, ItemBase item, int amount)
-    {
-        int loc = inventory.Inventory.FindIndex(x => x.Key.Compare(item));
-        if (loc != -1)
-        {
-            KeyValuePair<ItemBase, int> kvp = inventory.Inventory[loc];
-            inventory.Inventory[loc] = new KeyValuePair<ItemBase, int>(kvp.Key, kvp.Value - amount);
-        }
+    ////For reducing the mass storage quantity as carts draw from it (between refreshes)
+    //public void StorageRemove(MassInventory inventory, ItemBase item, int amount)
+    //{
+    //    int loc = inventory.Inventory.FindIndex(x => x.Key.Compare(item));
+    //    if (loc != -1)
+    //    {
+    //        KeyValuePair<ItemBase, int> kvp = inventory.Inventory[loc];
+    //        inventory.Inventory[loc] = new KeyValuePair<ItemBase, int>(kvp.Key, kvp.Value - amount);
+    //    }
 
-        //if (inventory.Inventory.ContainsKey(item))
-        //    inventory.Inventory[item] -= amount;
-    }
+    //    //if (inventory.Inventory.ContainsKey(item))
+    //    //    inventory.Inventory[item] -= amount;
+    //}
 
     /// <summary>
     ///     How many items are still needed by the network
@@ -618,8 +634,10 @@ public class FreightCartManager
         {
             if (station != null && !string.IsNullOrEmpty(station.NetworkID))
                 Debug.LogWarning("FreightCartManager Tried to get station needs for null provider - probably mass storage?");
+            else if (station == null)
+                Debug.LogWarning("FreightCartManager Tried to get station needs for null station?");
             else
-                Debug.LogWarning("FreightCartManager Tried to get station needs for null station or networkid?");
+                Debug.LogWarning("FreightCartManager Tried to get station needs for null networkid?");
             return new List<KeyValuePair<ItemBase, int>>();
         }
         if (station.AttachedInterface != null)
@@ -763,6 +781,8 @@ public class FreightCartManager
                     {
                         //Check all of the connected stations
                         FreightCartStation station = inv.ConnectedStations[p];
+                        if (string.IsNullOrEmpty(station.NetworkID))
+                            continue;
                         //Debug.LogWarning("Current station being checked.  ID: " + station.StationID.ToString());
                         if (station.NetworkID == networkid)
                         {
@@ -827,16 +847,17 @@ public class FreightCartManager
             List<FreightInterfaceContainer> containers = this.FreightInterfaces;
             foreach (FreightInterfaceContainer container in containers)
             {
+                if (container.Station == null || string.IsNullOrEmpty(container.Station.NetworkID)) continue;
                 if (!wantsoffers)
                 {
                     KeyValuePair<ItemBase, int> kvp = this.GetStationNeeds(container.Station).Where(x => x.Key.Compare(item) && x.Value > 0).FirstOrDefault();
-                    if (!kvp.Equals(default(KeyValuePair<ItemBase, int>)))
+                    if (!kvp.Equals(default(KeyValuePair<ItemBase, int>)) && container.Station.NetworkID == networkid)
                         return container.Station;
                 }
                 else
                 {
                     KeyValuePair<ItemBase, int> kvp = this.GetStationOfferings(container.Station).Where(x => x.Key.Compare(item) && x.Value > 0).FirstOrDefault();
-                    if (!kvp.Equals(default(KeyValuePair<ItemBase, int>)))
+                    if (!kvp.Equals(default(KeyValuePair<ItemBase, int>)) && container.Station.NetworkID == networkid)
                         return container.Station;
                 }
             }
@@ -874,10 +895,10 @@ public class FreightCartManager
         }
     }
 
-    static int Compare2(KeyValuePair<ItemBase, int> a, KeyValuePair<ItemBase, int> b)
-    {
-        return -a.Value.CompareTo(b.Value);
-    }
+    //static int Compare2(KeyValuePair<ItemBase, int> a, KeyValuePair<ItemBase, int> b)
+    //{
+    //    return -a.Value.CompareTo(b.Value);
+    //}
 
     public void UpdateMassInventory()
     {

@@ -152,9 +152,12 @@ public class FreightTrackJunction : MachineEntity
         //Store visited track pieces for catching when the segment enters a closed loop
         List<TrackPiece> VisitedTracks = new List<TrackPiece>();
 
+        //Add a penalty for pathfinding in certain directions to avoid stations and other undesirable routes
+        int PathfindPenalty = 0;
+
         //Begin loop here.  Direction can be set and used to check the next location each time through the loop
-        //Allow segments only up to 512m long due to cost of loop checking - may revise after testing
-        for (int n = 0; n < 512; n++)
+        //Allow segments only up to 2048 long due to cost of loop checking - may revise after testing
+        for (int n = 0; n < 2048; n++)
         {
             switch (direction)
             {
@@ -216,6 +219,7 @@ public class FreightTrackJunction : MachineEntity
             }
 
             Vector3 trackvec = SegmentCustomRenderer.GetRotationQuaternion(lFlags1) * Vector3.forward;
+            bool oneway = false;
             trackvec.Normalize();
             trackvec.x = trackvec.x >= -0.5 ? (trackvec.x <= 0.5 ? 0.0f : 1f) : -1f;
             trackvec.y = trackvec.y >= -0.5 ? (trackvec.y <= 0.5 ? 0.0f : 1f) : -1f;
@@ -231,6 +235,7 @@ public class FreightTrackJunction : MachineEntity
                     else if (!(trackvec == dirvec) && !(trackvec == -dirvec))
                     {
                         dirvec = new Vector3(trackvec.x, 0f, trackvec.z);
+                        oneway = true; // Can't set return path as the same -> they're different!
                     }
                 }
                 if ((type == TRACKTYPE && lValue1 == TRACKCORNER) || (type == ScrapTrackType && lValue1 == ScrapCornerVal))
@@ -270,6 +275,9 @@ public class FreightTrackJunction : MachineEntity
                     if ((trackvec == dirvec) || (trackvec == -dirvec))
                     {
                         //Do nothing... direction doesn't change
+                        //Except turbo... reduce the penalty for this path!
+                        if (lValue1 == CONTROLTURBO)
+                            PathfindPenalty--;
                     }
                     else
                         return false;
@@ -300,6 +308,8 @@ public class FreightTrackJunction : MachineEntity
                         SegmentStations.Add(fcs);
                     fcs.ClosestJunction = this;
                     fcs.JunctionDirection = initialdirection;
+                    // Penalize this route for multidirection pathfinding due to the station
+                    PathfindPenalty += 5;
                 }
                 else
                     return false;
@@ -325,22 +335,28 @@ public class FreightTrackJunction : MachineEntity
                     return false;
                 }
                 this.ConnectedJunctions[initialdirection] = junction;
-                FreightTrackSegment tracksegment = new FreightTrackSegment(this, junction, n + 1);
+                //Don't let segment distance be negative just to be safe!  This should rarely happen...
+                if (PathfindPenalty < 0 && Math.Abs(PathfindPenalty) > n)
+                    PathfindPenalty = -n;
+                FreightTrackSegment tracksegment = new FreightTrackSegment(this, junction, n + 1 + PathfindPenalty);
                 tracksegment.Stations = SegmentStations;
                 //Debug.LogWarning("trackseg station count: " + tracksegment.Stations.Count);
                 this.ConnectedSegments[initialdirection] = tracksegment;
                 this.SegmentDistances[initialdirection] = n + 1;
                 this.LinkStatusDirty = true;
 
-                //handle the connection for the other junction so we don't need to double the work
+                //handle the connection for the other junction so we don't need to double the work - only if return path is valid!
                 //Mirror the direction to reflect the correct side of the connecting junction
-                int mirroreddir = direction += 2;
-                if (mirroreddir > 3)
-                    mirroreddir -= 4;
-                junction.ConnectedJunctions[mirroreddir] = this;
-                junction.ConnectedSegments[mirroreddir] = tracksegment;
-                junction.SegmentDistances[mirroreddir] = n + 1;
-                junction.LinkStatusDirty = true;
+                if (!oneway)
+                {
+                    int mirroreddir = direction += 2;
+                    if (mirroreddir > 3)
+                        mirroreddir -= 4;
+                    junction.ConnectedJunctions[mirroreddir] = this;
+                    junction.ConnectedSegments[mirroreddir] = tracksegment;
+                    junction.SegmentDistances[mirroreddir] = n + 1;
+                    junction.LinkStatusDirty = true;
+                }
                 return true;
             }
             else if (type == TOURSTATIONTYPE)
@@ -401,8 +417,8 @@ public class FreightTrackJunction : MachineEntity
                 }
             }
             VisitedTracks.Add(visitedpiece);
-            if (n == 511)
-                Debug.LogWarning("Track Junction Found track length > 512m -> ending search.");
+            if (n == 2047)
+                Debug.LogWarning("Track Junction Found track length > 2048m -> ending search.");
         }
         return false;
     }
@@ -552,17 +568,27 @@ public class FreightTrackJunction : MachineEntity
 
     /// <summary>
     ///     Returns the direction corresponding with the route out of this junction to get to the destination junction
+    ///     Ensures shortest route by checking for duplicate paths to the same junction and takes the shortest.
     /// </summary>
     /// <param name="junction">Destination junction</param>
     /// <returns>Direction integer</returns>
     public int GetConnectedDirection(FreightTrackJunction junction)
     {
+        int shortestroute = -1;
         for (int n = 0; n < 4; n++)
         {
             if (this.ConnectedJunctions[n] == junction)
-                return n;
+            {
+                if (shortestroute == -1)
+                    shortestroute = n;
+                else
+                {
+                    if (this.ConnectedSegments[n].Length < this.ConnectedSegments[shortestroute].Length)
+                        shortestroute = n;
+                }
+            }
         }
-        return -1;
+        return shortestroute;
     }
 
     public ushort GetCube(long lTestX, long lTestY, long lTestZ, out ushort lValue, out byte lFlags)

@@ -4,7 +4,7 @@ using UnityEngine;
 public class FreightTrackSegment
 {
     public List<FreightTrackJunction> ConnectedJunctions = new List<FreightTrackJunction>();
-    public int Length;
+    public int Length;  // Actual pathfinding length!  Can include penalties!
     public FreightTrackNetwork TrackNetwork;
     public List<FreightCartStation> Stations = new List<FreightCartStation>();
 

@@ -359,9 +359,9 @@ public class FreightCartMob : MobEntity
     private void UpdateLoadStatus()
     {
         this.mrLoadTimer += MobUpdateThread.mrPreviousUpdateTimeStep;
-        if (this.FCStation == null && (this.meLoadState == eLoadState.eLoading || this.meLoadState == eLoadState.eUnloading))
+        if (this.FCStation == null && (this.meLoadState == eLoadState.eLoading || this.meLoadState == eLoadState.eUnloading) || (this.FCStation != null && this.FCStation.mbDelete))
         {
-            Debug.LogError((object)"Error, our station went null!");
+            Debug.LogError((object)"Error, our station went null or player destroyed it while it had a cart!");
             this.LeaveStation();
         }
         // Scrap carts only check load/unload once a second-ish effectively slowing their throughput at a station to 60 items/min.
@@ -404,7 +404,7 @@ public class FreightCartMob : MobEntity
                 //Get the network stock to compare and adjust accordingly to unloading etc.
                 //if (this.CurrentNetworkStock == null)
                 //    this.CurrentNetworkStock = FreightCartManager.instance.GetNetworkStock(this.FCStation);
-                if (HasAttachedConsumer() && this.TransferInventory.ItemCount() == 0 && this.LocalInventory.ContainsKey(this.NetworkID) && this.LocalInventory[this.NetworkID].ItemCount() != 0)
+                if (HasAttachedConsumer() && this.TransferInventory.ItemCount() == 0 && this.LocalInventory.ContainsKey(this.NetworkID) && this.LocalInventory[this.NetworkID].ItemCount() != 0 && !string.IsNullOrEmpty(this.FCStation.NetworkID))
                 {
                     List<KeyValuePair<ItemBase, int>> needs = FreightCartManager.instance.GetStationNeeds(this.FCStation);
                     for (int index = 0; index < needs.Count; index++)
@@ -492,9 +492,11 @@ public class FreightCartMob : MobEntity
                 //    this.CurrentNetworkStock = FreightCartManager.instance.GetNetworkStock(this.FCStation);
                 this.FCStation.mrCartOnUs = 1f;
                 //this.FCStation.mrLastCartLeavTimer = this.mrLoadTimer;
-                if (HasAttachedConsumer() && this.StationOfferings == null)
+                // Refresh the offerings for the wait for full case in case items change while we're waiting
+                if (HasAttachedConsumer() && this.StationOfferings == null || this.mrLoadTimer > 35)
                 {
                     this.StationOfferings = FreightCartManager.instance.GetStationOfferings(this.FCStation);
+                    this.mrLoadTimer = 0;
                 }
                 if (this.StationOfferings != null && this.StationOfferings.Count > 0)
                 {
@@ -995,7 +997,7 @@ public class FreightCartMob : MobEntity
                     {
                         this.EmptyEscape = false;
                         FreightCartStation Station = this.mUnderSegment.FetchEntity(eSegmentEntity.Mod, this.mnX, this.mnY - 1L, this.mnZ) as FreightCartStation;
-                        if (Station == null)
+                        if (Station == null || string.IsNullOrEmpty(Station.NetworkID))
                             this.LeaveStation();
                         else if (Station.mrCartOnUs <= 0.0)
                         {
@@ -1043,7 +1045,6 @@ public class FreightCartMob : MobEntity
                     //TODO: Add a check to try to navigate to the destination from here... DONE!
                     // If we can find it then maybe the network was already rebuilt?  Or at least safe...
                     // This might cut down significantly on the false rebuilds.
-
                     Stack<FreightTrackJunction> updatedroute = junction.TrackNetwork.RouteFind(junction, this.DestinationJunction);
 
                     if (updatedroute.Count > 0)
@@ -1052,7 +1053,8 @@ public class FreightCartMob : MobEntity
                     }
                     else
                     {
-                        Debug.LogWarning("FreightCartMob arrived at junction with ID " + junction.JunctionID.ToString() + " expecting junction " + this.NextJunction.JunctionID.ToString() + ".  Suspect track network outdated... rebuilding...");
+                        if (junction != null && this.NextJunction != null)
+                            Debug.LogWarning("FreightCartMob arrived at junction with ID " + junction.JunctionID.ToString() + " expecting junction " + this.NextJunction.JunctionID.ToString() + ".  Suspect track network outdated... rebuilding...");
                         if (this.LastJunction == null)
                             Debug.LogWarning("FreightCartMob NextJunction wasn't null when navigating to wrong junction but last is null?");
                         else if (ManagerSync.RebuildTimer <= 0 && WorldScript.mbIsServer) //Don't rebuild on clients... seems to break things since data is missing....
@@ -1072,24 +1074,35 @@ public class FreightCartMob : MobEntity
 
                 if (this.DestinationJunction == null)
                     this.ChooseDestination(junction);
-
+                this.LastJunction = junction;
                 if (this.DestinationJunction != null)
                 {
                     //Debug.LogWarning("We have a destination junction with ID: " + this.DestinationJunction.JunctionID.ToString());
                     if (this.DestinationJunction != junction)
                     {
                         //Debug.LogWarning("Freight Cart Destination junction != current junction");
-                        this.LastJunction = junction;
                         if (this.JunctionRoute.Count != 0)
                         {
                             this.NextJunction = this.JunctionRoute.Pop();
                             dest = this.GetLookFromDirection(junction.GetConnectedDirection(this.NextJunction));
+                            if (!dest)
+                                Debug.LogWarning("FreightCartMob Failed to get look from direction with next junction");
+                        }
+                        else
+                        {
+                            //if (WorldScript.mbIsServer)
+                                //Debug.LogWarning("FreightCartMob has a destination junction but no junctionroute to navigate!");
+                            dest = this.GetLookFromDirection(-1);
+                            if (!dest)
+                                Debug.LogWarning("FreightCartMob failed to get look from direction with no route case!");
                         }
                     }
                     else
                     {
                         //Debug.LogWarning("The current junction is the destination");
                         dest = this.GetLookFromDirection(this.DestinationDirection);
+                        if (!dest)
+                            Debug.LogWarning("FreightCartMob failed to get look from direction with final junction");
 
                         // Don't set the next junction to avoid the risk of rebuilding the network unnecessarily because of a long hold at a station
                         //if (this.DestinationDirection >= 0 && this.DestinationDirection <= 3)
@@ -1097,10 +1110,16 @@ public class FreightCartMob : MobEntity
                         this.NextJunction = null;
                         this.DestinationDirection = -1;
                         this.DestinationJunction = null;
-                        this.LastJunction = junction;
                         //Need to set expected junction for track network verification purposes on RemoveCart
                     }
                 }
+                else
+                {
+                    dest = this.GetLookFromDirection(-1);
+                    if (!dest)
+                        Debug.LogWarning("FreightCartMob failed to get look from direction with no destination junction");
+                }
+
                 //Debug.LogWarning("Freight Cart after pathfinding dest bool is: " + dest.ToString());
 
                 //New Default!! If we haven't decided... turn around.  No more derailing!
@@ -1248,7 +1267,7 @@ public class FreightCartMob : MobEntity
         else // Cart is empty
         {
             // Take up an assignment if we don't have one or check for a new assignment if ours is over serviced
-            if (this.AssignedStation == null || this.AssignedStation.AvailableCarts > this.AssignedStation.AssignedCarts)
+            if (this.AssignedStation == null || this.AssignedStation.AvailableCarts > this.AssignedStation.AssignedCarts || !this.CheckCartTier(this.AssignedStation.CartTier))
                 this.TryAssignCart(currentloc.TrackNetwork);
             if (this.AssignedStation != null)
             {
@@ -1313,7 +1332,7 @@ public class FreightCartMob : MobEntity
             for (int m = 0; m < seg.Stations.Count; m++)
             {
                 FreightCartStation station = seg.Stations[m];
-                if (station == null || !this.CheckCartTier(station.CartTier))
+                if (station == null || string.IsNullOrEmpty(station.NetworkID) || !this.CheckCartTier(station.CartTier))
                     continue;
                 // Assign the cart to the station if it has explicit free slots, mark it for smart assignment if it has the least excess carts
                 int overage = station.AvailableCarts - station.AssignedCarts;
@@ -1383,6 +1402,20 @@ public class FreightCartMob : MobEntity
     /// <returns></returns>
     private bool GetLookFromDirection(int direction)
     {
+        //Try returning on a safe route out of the junction rather than passing through to a possible demise if no path
+        if (direction == -1)
+        {
+            for (int n = 0; n < 4; n++)
+            {
+                if (this.LastJunction.ConnectedJunctions[n] != null)
+                {
+                    direction = n;
+                    this.DestinationJunction = null;
+                    this.NextJunction = null;
+                    this.DestinationDirection = -1;
+                }
+            }
+        }
         if (direction == 0)
             this.mLook = Vector3.right;
         else if (direction == 1)
@@ -1397,6 +1430,7 @@ public class FreightCartMob : MobEntity
             this.DestinationJunction = null;
             this.NextJunction = null;
             this.DestinationDirection = -1;
+            this.mLook = -this.mLook; //Stay at the junction because there's literally no safe path out!
             return false;
         }
         //Debug.LogWarning("Look selected from direction with look: " + this.mLook.ToString() + " from direction: " + direction.ToString());

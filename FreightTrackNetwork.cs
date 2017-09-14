@@ -11,12 +11,16 @@ public class FreightTrackNetwork
     public int NetworkID;
     public static int Networks = 0;
     private object safety = new object();
+    private object JunLock = new object();
 
     public FreightTrackNetwork(FreightTrackJunction junction)
     {
         this.NetworkID = Networks;
         Networks++;
-        this.TrackJunctions.Add(junction);
+        lock (JunLock)
+        {
+            this.TrackJunctions.Add(junction);
+        }
         if (FreightCartManager.instance != null)
             FreightCartManager.instance.GlobalTrackNetworks.Add(this);
         else
@@ -30,7 +34,10 @@ public class FreightTrackNetwork
 
     public bool ContainsJunction(FreightTrackJunction junction)
     {
-        return this.TrackJunctions.Contains(junction);
+        lock (JunLock)
+        {
+            return this.TrackJunctions.Contains(junction);
+        }
     }
 
     public List<FreightCartStation> GetNetworkStations()
@@ -50,7 +57,23 @@ public class FreightTrackNetwork
         return stations;
     }
 
-    public void GetNetworkStats(out int assignedcarts, out int availcarts)
+    public bool CheckNetworkClosure()
+    {
+        lock (JunLock)
+        {
+            foreach (FreightTrackJunction junction in this.TrackJunctions)
+            {
+                for (int n = 0; n < 4; n++)
+                {
+                    if (junction.ConnectedJunctions[n] == null)
+                        return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    public void GetNetworkStats(out int assignedcarts, out int availcarts, out bool networkclosed)
     {
         List<FreightCartStation> stations = this.GetNetworkStations();
         int count = stations.Count;
@@ -62,6 +85,7 @@ public class FreightTrackNetwork
             assignedcarts += station.AssignedCarts;
             availcarts += station.AvailableCarts;
         }
+        networkclosed = this.CheckNetworkClosure();
     }
 
     public void NetworkIntegrityCheck(List<FreightTrackJunction> junctions)
@@ -201,12 +225,18 @@ public class FreightTrackNetwork
                     trackseg.TrackNetwork = network;
                 }
             }
-            junction.TrackNetwork.TrackJunctions.Remove(junction);
+            lock (JunLock)
+            {
+                junction.TrackNetwork.TrackJunctions.Remove(junction);
+            }
             if (junction.TrackNetwork.TrackJunctions.Count == 0)
                 FreightCartManager.instance.GlobalTrackNetworks.Remove(junction.TrackNetwork);
             junction.TrackNetwork = network;
-            if (!network.TrackJunctions.Contains(junction))
-                network.TrackJunctions.Add(junction);
+            lock (JunLock)
+            {
+                if (!network.TrackJunctions.Contains(junction))
+                    network.TrackJunctions.Add(junction);
+            }
         }
         network.ResetJunctionIndices();
         network.ReassignTourCartStations(this);
@@ -219,13 +249,19 @@ public class FreightTrackNetwork
     /// </summary>
     public void ResetJunctionIndices()
     {
-        for (int n = 0; n < this.TrackJunctions.Count; n++)
-            this.TrackJunctions[n].JunctionIndex = n;
+        lock (JunLock)
+        {
+            for (int n = 0; n < this.TrackJunctions.Count; n++)
+                this.TrackJunctions[n].JunctionIndex = n;
+        }
     }
 
     public FreightTrackJunction GetJunctionFromID(int junctionID)
     {
-        return this.TrackJunctions.FirstOrDefault(x => x.JunctionID == junctionID);
+        lock (JunLock)
+        {
+            return this.TrackJunctions.FirstOrDefault(x => x.JunctionID == junctionID);
+        }
     }
 
     /// <summary>
@@ -273,7 +309,11 @@ public class FreightTrackNetwork
 
             if (!localjunctions.Contains(start) || !localjunctions.Contains(destination))
             {
-                Debug.LogWarning("FreightTrackNetwork RouteFind attempted to rount to/from inaccessible junction\n start id " + start.JunctionID + " destination id " + destination.JunctionID + " trackjunctions count: " + localjunctions.Count);
+                Vector3 vec = WorldScript.instance.mPlayerFrustrum.GetCoordsToUnity(start.mnX, start.mnY, start.mnZ);
+                CubeCoord coordstart = new CubeCoord((long)vec.x, (long)vec.y, (long)vec.z);
+                Vector3 vec2 = WorldScript.instance.mPlayerFrustrum.GetCoordsToUnity(start.mnX, start.mnY, start.mnZ);
+                CubeCoord coorddest = new CubeCoord((long)vec2.x, (long)vec2.y, (long)vec2.z);
+                Debug.LogWarning("FreightTrackNetwork RouteFind attempted to rount to/from inaccessible junction\n start id " + start.JunctionID + " with coords: [" + coordstart.ToString() + "] destination id " + destination.JunctionID + " with coords [" + coorddest.ToString() + "] trackjunctions count: " + localjunctions.Count);
                 return CartRoute;
             }
             int junctioncount = localjunctions.Count;
@@ -326,7 +366,7 @@ public class FreightTrackNetwork
                     }
                     initialdis = distances[neighborindex];
                     currentdis = distances[currentnode];
-                    tryroute = currentdis + neighbor.SegmentDistances[n];
+                    tryroute = currentdis + neighbor.ConnectedSegments[n].Length;
                     //If the newly calculated distance to the neighbor is shorter than the previous replace it and update pathing accordingly
                     if (tryroute < initialdis)
                     {
@@ -374,7 +414,7 @@ public class FreightTrackNetwork
                 safetycount++;
                 if (safetycount > 255)
                 {
-                    Debug.LogWarning("FreightTrackNetwork RouteFind failed construction or path has over 255 visited junctions!");
+                    Debug.LogWarning("FreightTrackNetwork RouteFind failed construction or path has over 255 visited junctions! Network junction count: " + this.TrackJunctions.Count);
                     CartRoute = null;
                     return new Stack<FreightTrackJunction>();
                 }
